@@ -74,3 +74,12 @@ def test_obsidian_and_notebooklm_exports_create_structured_layout(tmp_path: Path
     nlm_text = nlm_path.read_text(encoding="utf-8")
     assert "NotebookLM" in nlm_text
     assert topic.deep_insight in nlm_text
+
+
+def test_model_alias_resolution() -> None:
+    from src.agent.engine import resolve_model_name
+
+    assert resolve_model_name("3.8f") == "gemini-3.8-flash"
+    assert resolve_model_name("4h") == "gemini-4-hydrogen"
+    assert resolve_model_name("4a") == "gemini-4-argon"
+    assert resolve_model_name("custom-model") == "custom-model"
