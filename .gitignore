@@ -1,0 +1,13 @@
+# Python & uv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets & local runtime data
+.env
+data/
+vault/
+
+# macOS
+.DS_Store
