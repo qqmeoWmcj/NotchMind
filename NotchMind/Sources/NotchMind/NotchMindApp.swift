@@ -35,6 +35,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.stop()
     }
 
+    func syncToGitHub() {
+        Task.detached { [weak self] in
+            guard let self else { return }
+            let scriptPath = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("ai-hotspot-creator")
+                .appendingPathComponent("sync.sh").path
+            guard FileManager.default.fileExists(atPath: scriptPath) else { return }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [scriptPath, "chore: sync from NotchMind macOS HUD"]
+            try? process.run()
+            process.waitUntilExit()
+            await MainActor.run {
+                if process.terminationStatus == 0 {
+                    self.engine.status = .paused(reason: "已同步到 GitHub")
+                } else {
+                    self.engine.status = .error(message: "GitHub 同步需先配置 origin 远端")
+                }
+            }
+        }
+    }
+
     func openSettingsWindow() {
         NSApp.setActivationPolicy(.regular)
 
@@ -79,8 +101,14 @@ struct NotchMindApp: App {
             Button("捕获当前画面 (⌘⇧S)") {
                 appDelegate.engine.triggerManualCapture()
             }
+            Button("展开/收起灵动岛 (⌘⌃N)") {
+                appDelegate.engine.toggleHUDExpansion()
+            }
             Button("打开 Obsidian") {
                 appDelegate.engine.openInObsidian()
+            }
+            Button("同步知识库到 GitHub") {
+                appDelegate.syncToGitHub()
             }
             Divider()
             Button("设置...") {

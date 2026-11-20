@@ -28,7 +28,7 @@ public struct NotchHUDView: View {
     }
 
     private var isExpanded: Bool {
-        isHovered || isPinnedOpen || engine.undoBanner != nil
+        isHovered || isPinnedOpen || engine.isHUDForceExpanded || engine.undoBanner != nil
     }
 
     private var collapsedWidth: CGFloat {

@@ -180,12 +180,24 @@ def main() -> None:
     switch_cmd = sub.add_parser("switch", help="切换默认 Gemini 模型（支持 3.8f / 4h / 4a）")
     switch_cmd.add_argument("model", type=str, help="模型别名或完整名称，例如 3.8f 或 4h")
 
+    push_cmd = sub.add_parser("push", help="一句话检查、提交并推送到 GitHub 远程仓库")
+    push_cmd.add_argument("message", nargs="?", default="", help="可选的 commit 描述")
+
     args = parser.parse_args()
     if args.command == "run":
         asyncio.run(run_pipeline(top_k=args.top, dry_run=args.dry_run, model=args.model))
     elif args.command == "switch":
         resolved = switch_default_model(args.model)
         console.print(f"[green]✓[/green] 默认模型已切换为：[bold]{resolved}[/bold]（已写入 .env）")
+    elif args.command == "push":
+        import subprocess
+        script = PROJECT_ROOT / "sync.sh"
+        cmd = [str(script)]
+        if args.message:
+            cmd.append(args.message)
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
 
 
 if __name__ == "__main__":

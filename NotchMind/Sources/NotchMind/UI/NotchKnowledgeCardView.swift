@@ -45,6 +45,9 @@ struct NotchKnowledgeCardView: View {
             Button("导出到项目优化清单") {
                 engine.exportFeedbackToProject(entry)
             }
+            Button("拷贝实操任务配方 (Markdown)") {
+                engine.copyActionRecipe(entry)
+            }
             Button("拷贝核心参数与结论") {
                 engine.copyEssence(entry)
             }

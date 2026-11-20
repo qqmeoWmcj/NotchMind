@@ -29,6 +29,7 @@ public final class CompanionEngine: ObservableObject {
     @Published public var captureCountToday: Int = 0
     @Published public var undoBanner: UndoAction?
     @Published public var lastRestoredEntryID: String?
+    @Published public var isHUDForceExpanded: Bool = false
 
     public let settings: SettingsStore
     private var dedupe: DedupeStore?
@@ -63,9 +64,14 @@ public final class CompanionEngine: ObservableObject {
 
     public func start() {
         refreshEntries()
-        hotkeyManager.registerCaptureShortcut { [weak self] in
-            self?.triggerManualCapture()
-        }
+        hotkeyManager.registerShortcuts(
+            onCapture: { [weak self] in
+                self?.triggerManualCapture()
+            },
+            onToggle: { [weak self] in
+                self?.toggleHUDExpansion()
+            }
+        )
         clipboardMonitor = ClipboardMonitor { [weak self] url in
             guard let self, self.settings.clipboardWatchEnabled else { return }
             self.submitLink(url, isAutoClipboard: true)
@@ -174,10 +180,40 @@ public final class CompanionEngine: ObservableObject {
         }
     }
 
+    public func toggleHUDExpansion() {
+        isHUDForceExpanded.toggle()
+    }
+
     public func copyEssence(_ entry: KnowledgeEntry) {
         let text = entry.copyableSnippets.first ?? entry.oneLineEssence
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        lastCopiedID = entry.id
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.8))
+            if self?.lastCopiedID == entry.id {
+                self?.lastCopiedID = nil
+            }
+        }
+    }
+
+    public func copyActionRecipe(_ entry: KnowledgeEntry) {
+        var lines: [String] = ["### 实操与优化任务清单: \(entry.title)"]
+        if !entry.projectOptimizations.isEmpty {
+            lines.append("\n#### 针对项目优化建议")
+            for opt in entry.projectOptimizations {
+                lines.append("- [ ] 建议: \(opt)")
+            }
+        }
+        if !entry.actionableSteps.isEmpty {
+            lines.append("\n#### 实操执行步骤")
+            for (idx, step) in entry.actionableSteps.enumerated() {
+                lines.append("- [ ] 步骤 \(idx + 1): \(step)")
+            }
+        }
+        let full = lines.joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(full, forType: .string)
         lastCopiedID = entry.id
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.8))
