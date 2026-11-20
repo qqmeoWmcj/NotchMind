@@ -48,6 +48,9 @@ struct NotchKnowledgeCardView: View {
             Button("拷贝实操任务配方 (Markdown)") {
                 engine.copyActionRecipe(entry)
             }
+            Button("生成并拷贝 Blender 脚本 (bpy)") {
+                engine.copyBlenderScript(entry)
+            }
             Button("拷贝核心参数与结论") {
                 engine.copyEssence(entry)
             }
@@ -115,6 +118,19 @@ struct NotchKnowledgeCardView: View {
                 engine.exportFeedbackToProject(entry)
             }
             .symbolEffect(.bounce, value: exported)
+
+            let copiedBlender = (engine.lastCopiedBlenderScriptID == entry.id)
+            if entry.isBlenderRelated || entry.blenderScript != nil {
+                iconButton(
+                    id: "blender",
+                    symbol: copiedBlender ? "checkmark.circle.fill" : "cube.transparent",
+                    tint: copiedBlender ? palette.primary : palette.secondary,
+                    help: "生成并拷贝 Blender 脚本 (bpy)"
+                ) {
+                    engine.copyBlenderScript(entry)
+                }
+                .symbolEffect(.bounce, value: copiedBlender)
+            }
 
             let copied = (engine.lastCopiedID == entry.id)
             iconButton(
@@ -228,6 +244,36 @@ struct NotchKnowledgeCardView: View {
                 ForEach(entry.projectOptimizations.prefix(3), id: \.self) { opt in
                     bulletLine(opt, color: palette.primary.opacity(0.92))
                 }
+            }
+
+            if entry.isBlenderRelated || entry.blenderScript != nil {
+                sectionHeader("Blender 实操脚本 (bpy)")
+                let isCopied = (engine.lastCopiedBlenderScriptID == entry.id)
+                Button {
+                    engine.copyBlenderScript(entry)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isCopied ? "checkmark.circle.fill" : "cube.transparent")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(isCopied ? palette.primary : palette.secondary)
+                        Text(isCopied ? "已拷贝实操脚本 (bpy) 到剪贴板" : "生成并拷贝可运行的 Blender (bpy) 脚本")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(palette.primary.opacity(0.92))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(palette.tertiary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(palette.fill)
+                    )
+                }
+                .buttonStyle(NotchPressStyle(scale: 0.98))
+                .help("直接将 Blender 4.x Python 参数脚本拷贝到剪贴板，在 Blender Scripting 运行")
             }
 
             if !entry.actionableSteps.isEmpty {

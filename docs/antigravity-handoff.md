@@ -25,6 +25,7 @@
 3. 测试守真实行为（真写 SQLite、真生成 Markdown），不写假 mock。
 4. 密钥与模型名只从 `.env` 读（`GEMINI_API_KEY` / `GEMINI_MODEL`），绝不硬编码。
 5. 交差前跑：`uv run pytest` + `uv run python -m src.main run --dry-run`。
+6. 子代理极简汇报：主会话严禁大段复制子代理长篇分析与大表格。主 Agent 仅在主对话输出一行极简完成卡片（引导点击子会话抽屉查看详情），详细日志与证据沉淀在子代理视图中。
 
 ## 快速上手（新会话的第一条消息模板）
 
@@ -35,6 +36,18 @@
 下一步：<谁做什么>
 请确认或提出异议（send_message + reply_to）。
 ```
+
+## 首飞验证（2026-11-20 管线体检结论）
+
+两端接线已确认：Antigravity 的 `~/.gemini/config/mcp_config.json` 已挂 agent-hud（`/Applications/Agent HUD.app --mcp`），消息组工具（send_message / get_message / list_sessions / start_session）已在转发器列出（仅当「Let agents message each other」开启时才会列出）；语言服务器 2.33.0 在线；活跃主会话 `c4eac1f6-289f-4f00-b554-e149837deb85` 工作目录即本项目。
+
+**方向 A（Claude Code → Antigravity）**：在项目目录开一个 `claude` 会话，粘贴：
+> 用 agent-hud 的 send_message 发给 antigravity:c4eac1f6-289f-4f00-b554-e149837deb85：「【通道首飞】来自 Claude Code：请阅读 docs/antigravity-handoff.md 与 docs/review-2026-11-20.md，认领 NotchMind 侧 P0-5/6/8，然后用 send_message + reply_to 原路回复确认。」然后把返回的 message id 和 state 告诉我。
+
+**方向 B（Antigravity → Claude Code）**：在 Antigravity 的 ai-hotspot-creator 会话里粘贴：
+> 用 agent-hud 的 list_sessions 找一个空闲的 Claude Code 会话，用 send_message 发给它：「【通道首飞】来自 Antigravity：docs/antigravity-handoff.md 已读，分工确认。请用 send_message + reply_to 原路回执。」然后把 message id 和 state 给我看。
+
+**判读**：send_message 返回 `queued` 即入队成功；HUD 上纸飞机起飞；`get_message` 依次变 `taken → started → done`；对方用 `reply_to` 回执后原路飞回 = 双向连通。若返回 `refused` 看原因（对方无空闲会话 / 乘次上限 / 开关未开）。
 
 ## 已知限制（来自 agent-messages.md）
 

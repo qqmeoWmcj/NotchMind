@@ -261,6 +261,11 @@ public enum ObsidianWriter {
                 lines.append("```text\n\(sn)\n```")
             }
         }
+        if let script = entry.blenderScript, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("")
+            lines.append("**Blender 实操脚本 (bpy)**")
+            lines.append("```python\n\(script)\n```")
+        }
         if !entry.furtherExploration.isEmpty {
             lines.append("")
             lines.append("**延伸思考与下一步**")
@@ -333,6 +338,11 @@ public enum ObsidianWriter {
             for pit in entry.pitfalls {
                 blockLines.append("- \(pit)")
             }
+        }
+        if let script = entry.blenderScript, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            blockLines.append("")
+            blockLines.append("**Blender 实操脚本 (bpy)**")
+            blockLines.append("```python\n\(script)\n```")
         }
         blockLines.append("")
         blockLines.append("---")

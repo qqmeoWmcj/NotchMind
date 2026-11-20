@@ -56,6 +56,7 @@ public final class HUDWindowController: NSObject {
     private let engine: CompanionEngine
     private let openSettingsAction: @MainActor () -> Void
     private var screenObserver: NSObjectProtocol?
+    private var screenChangeObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
     private var moveObserver: NSObjectProtocol?
     private var isUpdatingFrame: Bool = false
@@ -134,6 +135,16 @@ public final class HUDWindowController: NSObject {
             }
         }
 
+        screenChangeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeScreenNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reposition()
+            }
+        }
+
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
@@ -150,7 +161,7 @@ public final class HUDWindowController: NSObject {
     }
 
     public func reposition() {
-        guard let panel, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let panel, let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
         let metrics = ScreenNotchMetrics.detect(for: screen)
         isUpdatingFrame = true
         panel.setFrame(computePanelFrame(metrics: metrics), display: true)

@@ -250,6 +250,7 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
     public var selfCheckQA: [QuizItem]
     public var copyableSnippets: [String]
     public var furtherExploration: [String]
+    public var blenderScript: String?
     public var createdAt: String
 
     enum CodingKeys: String, CodingKey {
@@ -267,6 +268,7 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         case selfCheckQA = "self_check_qa"
         case copyableSnippets = "copyable_snippets"
         case furtherExploration = "further_exploration"
+        case blenderScript = "blender_script"
         case createdAt = "created_at"
     }
 
@@ -289,6 +291,7 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         selfCheckQA: [QuizItem] = [],
         copyableSnippets: [String] = [],
         furtherExploration: [String] = [],
+        blenderScript: String? = nil,
         createdAt: String = Self.nowTimestamp()
     ) {
         self.title = title
@@ -308,6 +311,7 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         self.selfCheckQA = selfCheckQA
         self.copyableSnippets = copyableSnippets
         self.furtherExploration = furtherExploration
+        self.blenderScript = blenderScript
         self.createdAt = createdAt
         if let id, !id.isEmpty {
             self.id = id
@@ -336,7 +340,20 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         self.selfCheckQA = try c.decodeIfPresent([QuizItem].self, forKey: .selfCheckQA) ?? []
         self.copyableSnippets = try c.decodeIfPresent([String].self, forKey: .copyableSnippets) ?? []
         self.furtherExploration = try c.decodeIfPresent([String].self, forKey: .furtherExploration) ?? []
+        self.blenderScript = try c.decodeIfPresent(String.self, forKey: .blenderScript)
         self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? Self.nowTimestamp()
+    }
+
+    public var isBlenderRelated: Bool {
+        if blenderScript != nil { return true }
+        if domain == KnowledgeDomain.creative3D.rawValue { return true }
+        let text = "\(title) \(oneLineEssence) \(focusGoal ?? "") \(domain)".lowercased()
+        let keywords = [
+            "blender", "bpy", "3d", "建模", "材质", "节点", "eevee", "cycles",
+            "着色器", "渲染", "拓扑", "geometry node", "几何节点", "修改器", "modifier",
+            "贴图", "灯光", "雕刻", "骨骼", "权重", "uv", "动画"
+        ]
+        return keywords.contains { text.contains($0) }
     }
 
     public static func stableID(url: String, source: String, title: String, essence: String) -> String {

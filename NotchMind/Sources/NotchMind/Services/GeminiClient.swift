@@ -31,6 +31,7 @@ public enum GeminiClient {
         let self_check_qa: [QuizItem]?
         let copyable_snippets: [String]?
         let further_exploration: [String]?
+        let blender_script: String?
     }
 
     private struct APIResponse: Decodable {
@@ -113,7 +114,8 @@ public enum GeminiClient {
             {"question": "检验是否真懂的原理或场景应用题", "answer": "简洁准确的参考答案（30-80字）"}
           ],
           "copyable_snippets": ["可直接复用的 Prompt、命令、节点配方或代码片段（最多2条）"],
-          "further_exploration": ["顺着这个知识点下一步值得深挖的方向或关联主题（1-2条）"]
+          "further_exploration": ["顺着这个知识点下一步值得深挖的方向或关联主题（1-2条）"],
+          "blender_script": "若内容涉及 3D/Blender（建模、几何节点、材质Shader、渲染灯光、修改器、动画等），请生成一段可直接在 Blender Scripting 运行生效的 Python (bpy) 实操参数脚本（含 import bpy、安全检查与参数设置）；若完全非 3D 场景则为 null"
         }
 
         来源：\(source)
@@ -185,7 +187,8 @@ public enum GeminiClient {
                 pitfalls: parsed.pitfalls ?? [],
                 selfCheckQA: parsed.self_check_qa ?? [],
                 copyableSnippets: parsed.copyable_snippets ?? [],
-                furtherExploration: parsed.further_exploration ?? []
+                furtherExploration: parsed.further_exploration ?? [],
+                blenderScript: parsed.blender_script
             )
         } catch {
             throw ClientError.decodeFailed("\(error.localizedDescription) | \(jsonString)")
