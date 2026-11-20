@@ -272,7 +272,7 @@ def test_silent_macos_app_bundle_structure_and_no_terminal(tmp_path: Path) -> No
 
 def test_all_project_source_and_test_files_within_20kb_limit() -> None:
     max_bytes = 20480
-    skip_dirs = {".git", ".venv", ".pytest_cache", "__pycache__", ".obsidian", "vault", "data"}
+    skip_dirs = {".git", ".venv", ".pytest_cache", "__pycache__", ".obsidian", "vault", "data", ".build", "dist"}
     oversized: list[tuple[str, int]] = []
 
     for path in PROJECT_ROOT.rglob("*"):

@@ -8,6 +8,10 @@ __pycache__/
 .env
 data/
 vault/
+.obsidian/
+*.base
 
-# macOS
+# macOS & Swift build outputs
 .DS_Store
+.build/
+dist/
