@@ -160,7 +160,7 @@ struct NotchExpandedContentView: View {
                             .lineLimit(1)
                     }
                 } else {
-                    Text("设定学习目标")
+                    Text("设定学习方向与本地项目")
                         .font(.system(size: 11, weight: .regular))
                         .foregroundStyle(palette.tertiary)
                         .lineLimit(1)

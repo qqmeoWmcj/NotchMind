@@ -142,10 +142,17 @@ public struct NotchHUDView: View {
         }
         .shadow(
             color: isExpanded
-                ? Color.black.opacity(spec.isGlass ? 0.22 : 0.45)
+                ? Color.black.opacity(0.18)
                 : .clear,
-            radius: spec.isGlass ? 18 : 20,
-            y: spec.isGlass ? 8 : 10
+            radius: 5,
+            y: 2
+        )
+        .shadow(
+            color: isExpanded
+                ? Color.black.opacity(spec.isGlass ? 0.26 : 0.46)
+                : .clear,
+            radius: spec.isGlass ? 22 : 24,
+            y: spec.isGlass ? 10 : 12
         )
         .environment(\.colorScheme, palette.scheme)
         .environment(\.notchPalette, palette)

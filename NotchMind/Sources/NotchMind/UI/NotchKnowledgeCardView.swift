@@ -42,10 +42,10 @@ struct NotchKnowledgeCardView: View {
         .animation(NotchSpring.micro, value: isHovered)
         .animation(.easeOut(duration: 0.6), value: isFlashing)
         .contextMenu {
-            Button("反哺项目优化") {
+            Button("导出到项目优化清单") {
                 engine.exportFeedbackToProject(entry)
             }
-            Button("复制精华") {
+            Button("拷贝核心参数与结论") {
                 engine.copyEssence(entry)
             }
             Button("在 Obsidian 打开") {
@@ -118,7 +118,7 @@ struct NotchKnowledgeCardView: View {
                 id: "copy",
                 symbol: copied ? "checkmark" : "doc.on.doc",
                 tint: palette.secondary,
-                help: "复制精华"
+                help: "拷贝核心参数与结论"
             ) {
                 engine.copyEssence(entry)
             }

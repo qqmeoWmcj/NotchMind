@@ -76,7 +76,7 @@ struct NotchMindApp: App {
             Button(appDelegate.engine.settings.autoCompanionEnabled ? "暂停伴随同看" : "开始伴随同看") {
                 appDelegate.engine.toggleCompanion()
             }
-            Button("抓拍当前前台窗口 (⌘⇧S)") {
+            Button("捕获当前画面 (⌘⇧S)") {
                 appDelegate.engine.triggerManualCapture()
             }
             Button("打开 Obsidian") {
