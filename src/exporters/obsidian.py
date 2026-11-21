@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from src.exporters.skill_render import _format_concept_lines, _format_skill_lines
 from src.models import (
     DOMAIN_FILES,
     DOMAINS,
@@ -16,6 +17,7 @@ from src.models import (
     normalize_domain,
     now_timestamp,
 )
+from src.exporters.skill_vault import ensure_skill_directories, save_skill_card
 
 CONSOLE_FILENAME = "00-控制台与速览.md"
 PROJECTS_DIRNAME = "05-项目孵化池"
@@ -180,6 +182,11 @@ def _render_console_locked(vault_root: Path, data_dir: Path) -> None:
         "## 知识领域",
         " · ".join(f"[[{domain}]]" for domain in DOMAINS),
         "",
+        "## 个人超级技能库 (Skill Hub)",
+        "- [[01-精选技能库]]：独立技能卡片与即插即用 Prompt / 脚本",
+        "- [[02-即插即用工作流]]：多步骤实操工作流",
+        "- [[03-项目反哺任务池]]：项目具体落地待办清单",
+        "",
         "## 项目孵化池",
     ]
 
@@ -253,6 +260,7 @@ def ensure_vault_initialized(vault_root: Path, data_dir: Path) -> None:
     with _VAULT_LOCK:
         vault_root.mkdir(parents=True, exist_ok=True)
         data_dir.mkdir(parents=True, exist_ok=True)
+        ensure_skill_directories(vault_root)
 
         for domain, filename in DOMAIN_FILES.items():
             target = vault_root / filename
@@ -287,12 +295,27 @@ def _format_domain_entry(entry: KnowledgeEntry) -> str:
         f"> {line}" if line.strip() else ">"
         for line in entry.deep_insight.strip().splitlines()
     )
+    extra_lines: list[str] = []
+    extra_lines.extend(_format_skill_lines(entry))
+    if entry.actionable_steps:
+        extra_lines.append("- **实操步骤**：")
+        extra_lines.extend(f"  {idx}. {step}" for idx, step in enumerate(entry.actionable_steps, 1))
+    if entry.project_optimizations:
+        extra_lines.append(f"- **项目优化（[[{entry.matched_project}]]）**：")
+        extra_lines.extend(f"  - {opt}" for opt in entry.project_optimizations)
+    if entry.blender_script.strip():
+        extra_lines.append("- **Blender 脚本**：")
+        extra_lines.append("  ```python")
+        extra_lines.extend(f"  {line}" for line in entry.blender_script.strip().splitlines())
+        extra_lines.append("  ```")
+    extra_lines.extend(_format_concept_lines(entry))
+    extra_block = ("\n" + "\n".join(extra_lines) + "\n") if extra_lines else "\n"
     return (
         f"<!-- entry-id:{entry.id} -->\n"
         f"### [{entry.created_at}] {entry.title}\n"
         f"- {' · '.join(meta_parts)}\n"
         f"- **一句话本质**：{entry.one_line_essence}\n"
-        f"- **我可以怎么用**：{entry.how_to_apply}\n\n"
+        f"- **我可以怎么用**：{entry.how_to_apply}{extra_block}\n"
         f"> [!note]- 深度认知\n"
         f"{insight_lines}\n\n"
         f"---\n"
@@ -339,6 +362,12 @@ def _append_to_project_file_locked(
         f"  - 核心结论：{entry.one_line_essence}",
         f"  - 怎么用：{entry.how_to_apply}",
     ]
+    if entry.actionable_steps:
+        item_lines.append("  - 实操步骤：")
+        item_lines.extend(f"    {idx}. {step}" for idx, step in enumerate(entry.actionable_steps, 1))
+    if entry.project_optimizations and entry.matched_project:
+        item_lines.append(f"  - 项目优化（[[{entry.matched_project}]]）：")
+        item_lines.extend(f"    - {opt}" for opt in entry.project_optimizations)
     if entry.url:
         item_lines.append(f"  - 出处：{entry.url}")
     item_block = "\n".join(item_lines)
@@ -407,6 +436,7 @@ def save_knowledge_entry(
         entry_dict = model.model_dump()
         _prepend_to_domain_file_locked(vault_root, model)
         _append_to_project_file_locked(vault_root, data_dir, model)
+        save_skill_card(vault_root, model)
         entries.insert(0, entry_dict)
         _write_json_list(entries_path, entries)
         _render_console_locked(vault_root, data_dir)

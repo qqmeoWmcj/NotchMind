@@ -65,7 +65,7 @@ struct NotchExpandedContentView: View {
                 )
             }
         }
-        .padding(.horizontal, metrics.hasNotch ? 29 : 14)
+        .padding(.horizontal, 14)
         .padding(.top, metrics.hasNotch ? 4 : 14)
         .padding(.bottom, 14)
         .animation(.spring(response: 0.32, dampingFraction: 0.78), value: engine.undoBanner)

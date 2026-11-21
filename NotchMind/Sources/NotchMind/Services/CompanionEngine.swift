@@ -26,16 +26,19 @@ public final class CompanionEngine: ObservableObject {
     @Published public var searchQuery: String = ""
     @Published public var lastCopiedID: String?
     @Published public var lastFeedbackExportedID: String?
+    @Published public var lastSavedSkillHubID: String?
     @Published public var lastCopiedBlenderScriptID: String?
     @Published public var captureCountToday: Int = 0
     @Published public var undoBanner: UndoAction?
     @Published public var lastRestoredEntryID: String?
     @Published public var isHUDForceExpanded: Bool = false
+    @Published public var errorToastMessage: String?
 
     public let settings: SettingsStore
     var dedupe: DedupeStore?
     private var watchTimer: Timer?
     var undoDismissTask: Task<Void, Never>?
+    private var errorDismissTask: Task<Void, Never>?
     var undoRemainingSeconds: TimeInterval = 8.0
     var undoCountdownStartedAt: Date?
     private var lastAutoCaptureTime: Date = .distantPast
@@ -172,17 +175,37 @@ public final class CompanionEngine: ObservableObject {
                 self.status = self.activeTarget.map { .watching(target: $0.matchedSite) } ?? .idle
             } catch {
                 await self.dedupe?.releaseInFlight(canonicalKey: canonicalKey)
-                self.status = .error(message: error.localizedDescription)
-                if isAutoClipboard {
-                    try? await Task.sleep(for: .seconds(4))
-                    if self.status.isError { self.status = prevStatus }
-                }
+                self.reportError(error.localizedDescription, autoRecoverTo: prevStatus)
             }
         }
     }
 
     public func toggleHUDExpansion() {
         isHUDForceExpanded.toggle()
+    }
+
+    public func collapseHUD() {
+        isHUDForceExpanded = false
+    }
+
+    public func reportError(_ message: String, autoRecoverTo previousStatus: CompanionStatus? = nil) {
+        errorDismissTask?.cancel()
+        status = .error(message: message)
+        errorToastMessage = message
+        errorDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(3500))
+            if !Task.isCancelled {
+                self?.errorToastMessage = nil
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+            if !Task.isCancelled {
+                guard let self = self else { return }
+                if self.status.isError {
+                    let fallback = previousStatus ?? (self.activeTarget.map { .watching(target: $0.matchedSite) } ?? .idle)
+                    self.status = fallback
+                }
+            }
+        }
     }
 
     private func startWatchLoop() {
@@ -203,6 +226,35 @@ public final class CompanionEngine: ObservableObject {
         }
         if case .analyzing = status { return }
 
+        // 1. Zero-TCC fast inspection of frontmost application via NSWorkspace
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              let appName = front.localizedName,
+              appName != "NotchMind"
+        else {
+            if !status.isError { status = .idle }
+            activeTarget = nil
+            return
+        }
+
+        // 2. If active app is not a whitelisted candidate, never touch SCShareableContent
+        guard WindowMonitor.isCandidateApp(
+            frontApp: appName,
+            monitoringMode: mode,
+            focusKeywords: settings.focusKeywords
+        ) else {
+            if !status.isError { status = .idle }
+            activeTarget = nil
+            return
+        }
+
+        // 3. Throttle SCShareableContent polling:
+        // If app has not changed and capture is not yet due, keep current watching status without invoking SC
+        let elapsed = Date().timeIntervalSince(lastAutoCaptureTime)
+        let isCaptureDue = elapsed >= settings.captureIntervalSeconds
+        if !isCaptureDue && activeTarget?.appName == appName {
+            return
+        }
+
         let target = await WindowMonitor.detectWhitelistedForegroundWindow(
             allowedSiteKeywords: settings.allowedSiteKeywords,
             monitoringMode: mode,
@@ -217,8 +269,7 @@ public final class CompanionEngine: ObservableObject {
 
         status = .watching(target: target.matchedSite)
 
-        let elapsed = Date().timeIntervalSince(lastAutoCaptureTime)
-        if elapsed >= settings.captureIntervalSeconds {
+        if isCaptureDue {
             lastAutoCaptureTime = Date()
             await captureWindow(target, manual: false)
         }
@@ -274,7 +325,7 @@ public final class CompanionEngine: ObservableObject {
             if let key = acquiredFrameKey {
                 await dedupe?.releaseInFlight(canonicalKey: key)
             }
-            status = .error(message: error.localizedDescription)
+            reportError(error.localizedDescription)
         }
     }
 

@@ -32,7 +32,43 @@ extension CompanionEngine {
         }
     }
 
-    // MARK: - Copy Actions
+    // MARK: - Skill Hub & Copy Actions
+
+    public func saveToSkillHub(_ entry: KnowledgeEntry) {
+        do {
+            try ObsidianWriter.saveSkillCard(entry: entry, vaultDir: settings.vaultURL)
+            lastSavedSkillHubID = entry.id
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.8))
+                if self?.lastSavedSkillHubID == entry.id {
+                    self?.lastSavedSkillHubID = nil
+                }
+            }
+        } catch {
+            status = .error(message: "收录到技能库失败：\(error.localizedDescription)")
+        }
+    }
+
+    public func copyBestPayload(_ entry: KnowledgeEntry) {
+        let text = entry.bestCopyText
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        lastCopiedID = entry.id
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.8))
+            if self?.lastCopiedID == entry.id {
+                self?.lastCopiedID = nil
+            }
+        }
+    }
+
+    public func openTreasureLink(_ link: TreasureLink) {
+        guard let url = URL(string: link.url), url.scheme == "http" || url.scheme == "https" else {
+            status = .error(message: "无效的外部链接地址")
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
 
     public func copyEssence(_ entry: KnowledgeEntry) {
         let text = entry.copyableSnippets.first ?? entry.oneLineEssence

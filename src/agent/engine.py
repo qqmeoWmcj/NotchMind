@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import random
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dotenv import load_dotenv
 from google import genai
@@ -41,6 +42,28 @@ _MIME_FALLBACKS: dict[str, str] = {
 }
 
 _INLINE_MEDIA_LIMIT_BYTES = 15 * 1024 * 1024
+
+# TCP read timeout for the underlying socket. A missing read timeout is what turns a
+# stalled connection into a permanent worker deadlock — HTTP-level retries never fire.
+_GENAI_TIMEOUT_MS = 120_000
+_MAX_RETRY_ATTEMPTS = 4
+_BACKOFF_BASE_SECONDS = 2.0
+_BACKOFF_CAP_SECONDS = 30.0
+_RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def is_retryable_error(exc: Exception) -> bool:
+    """429 quota / 5xx / timeout errors are worth retrying; 400/403/404 are not."""
+    if isinstance(exc, errors.ServerError):
+        return True
+    return isinstance(exc, errors.ClientError) and getattr(exc, "code", None) in _RETRYABLE_STATUS
+
+
+def compute_backoff_delay(attempt: int, rng: Callable[[], float] = random.random) -> float:
+    """Full-jitter exponential backoff: uniform(0, min(cap, base * 2**attempt))."""
+    ceiling = min(_BACKOFF_CAP_SECONDS, _BACKOFF_BASE_SECONDS * (2 ** max(0, attempt)))
+    return ceiling * rng()
+
 
 
 def resolve_model_name(name: str) -> str:
@@ -108,10 +131,56 @@ def _match_known_project(candidate: str | None, project_names: list[str] | None)
     return None
 
 
+def _clean_payload_dicts(items: list[dict]) -> list[dict]:
+    """Keep only verbatim payloads that actually carry paste-able content."""
+    cleaned: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        cleaned.append(
+            {
+                "type": str(item.get("type") or "prompt").strip(),
+                "label": str(item.get("label") or "").strip(),
+                "content": content,
+                "source_note": str(item.get("source_note") or "").strip(),
+            }
+        )
+    return cleaned
+
+
+def _clean_link_dicts(items: list[dict]) -> list[dict]:
+    """Keep only treasure links with a usable URL."""
+    cleaned: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        cleaned.append(
+            {
+                "title": str(item.get("title") or url).strip(),
+                "url": url,
+                "why": str(item.get("why") or "").strip(),
+            }
+        )
+    return cleaned
+
+
 class GeminiHotspotAgent:
     """Reliable Gemini agent supporting model aliases, 503 retries, and multimodal analysis."""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        *,
+        sleep: Callable[[float], None] | None = None,
+        rng: Callable[[], float] | None = None,
+    ) -> None:
         if not os.getenv("GEMINI_API_KEY"):
             load_dotenv(PROJECT_ROOT / ".env", override=False)
         resolved_key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
@@ -123,11 +192,16 @@ class GeminiHotspotAgent:
             self.model = resolve_model_name(model)
         else:
             self.model, _ = get_current_model()
-        self.client = genai.Client(api_key=resolved_key)
+        self.client = genai.Client(
+            api_key=resolved_key,
+            http_options=types.HttpOptions(timeout=_GENAI_TIMEOUT_MS),
+        )
+        self._sleep = sleep or time.sleep
+        self._rng = rng or random.random
 
     def _generate_with_retry(self, contents: Any, schema: type, temperature: float) -> str:
         last_err: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(_MAX_RETRY_ATTEMPTS):
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
@@ -140,12 +214,15 @@ class GeminiHotspotAgent:
                     ),
                 )
                 return response.text
-            except errors.ServerError as exc:
+            except Exception as exc:  # noqa: BLE001
+                if not is_retryable_error(exc):
+                    raise
                 last_err = exc
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
+                if attempt < _MAX_RETRY_ATTEMPTS - 1:
+                    self._sleep(compute_backoff_delay(attempt, self._rng))
         assert last_err is not None
         raise last_err
+
 
     def _build_media_parts(
         self,
@@ -232,6 +309,11 @@ class GeminiHotspotAgent:
 
         extracted = KnowledgeExtraction.model_validate_json(raw_json)
         matched = _match_known_project(extracted.matched_project, project_names)
+        optimizations = (
+            [s.strip() for s in extracted.project_optimizations if s and s.strip()]
+            if matched
+            else []
+        )
         return KnowledgeEntry(
             title=extracted.title.strip() or title.strip() or "未命名知识条目",
             source=source,
@@ -244,6 +326,16 @@ class GeminiHotspotAgent:
             deep_insight=extracted.deep_insight.strip(),
             tags=extracted.tags,
             heat_score=extracted.heat_score,
+            actionable_steps=[s.strip() for s in extracted.actionable_steps if s and s.strip()],
+            project_optimizations=optimizations,
+            blender_script=extracted.blender_script.strip(),
+            concept_breakdown=extracted.concept_breakdown[:3],
+            skill_name=extracted.skill_name.strip(),
+            pain_point=extracted.pain_point.strip(),
+            copy_ready_payloads=_clean_payload_dicts(extracted.copy_ready_payloads),
+            treasure_links=_clean_link_dicts(extracted.treasure_links),
+            gotchas=[g.strip() for g in extracted.gotchas if g and g.strip()],
+            source_type=extracted.source_type.strip() or "general",
         )
 
     def analyze_item(

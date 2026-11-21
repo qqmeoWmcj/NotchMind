@@ -11,6 +11,30 @@ public enum WindowMonitor {
         "127.0.0.1", "localhost", "0.0.0.0", "notchmind", "ai 热点工作台",
     ]
 
+    /// Fast-path whitelist check: verifies whether an app is a candidate (PiliPlus, supported browser,
+    /// Blender, or matching focused keyword) entirely via NSWorkspace without touching ScreenCaptureKit / TCC.
+    public static func isCandidateApp(
+        frontApp: String,
+        monitoringMode: MonitoringMode = .continuous,
+        focusKeywords: [String] = []
+    ) -> Bool {
+        let app = frontApp.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !app.isEmpty, app != "NotchMind" else { return false }
+        if app == "PiliPlus" { return true }
+        if browserAppNames.contains(app) { return true }
+        if app.localizedCaseInsensitiveContains("Blender") { return true }
+        if monitoringMode == .focused {
+            let lowerApp = app.lowercased()
+            for kw in focusKeywords {
+                let cleaned = kw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !cleaned.isEmpty && lowerApp.contains(cleaned) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     /// Pure whitelist evaluation (unit-testable without Screen Recording permissions).
     public static func evaluate(
         frontApp: String,
@@ -125,6 +149,12 @@ public enum WindowMonitor {
               let appName = front.localizedName,
               appName != "NotchMind"
         else { return nil }
+
+        // Fast-path guard: if the active foreground app is not a whitelisted candidate
+        // (browser, PiliPlus, Blender, or focused keyword match), NEVER touch SCShareableContent.
+        guard isCandidateApp(frontApp: appName, monitoringMode: monitoringMode, focusKeywords: focusKeywords) else {
+            return nil
+        }
 
         let pid = front.processIdentifier
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {

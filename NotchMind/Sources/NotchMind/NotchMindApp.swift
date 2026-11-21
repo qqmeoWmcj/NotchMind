@@ -58,16 +58,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openSettingsWindow() {
-        NSApp.setActivationPolicy(.regular)
+        // Order matters for an LSUIElement/accessory app: activating first, then
+        // switching the activation policy, keeps AppKit from flashing the HUD
+        // (policy switches re-layout .canJoinAllSpaces/.stationary panels).
+        NSApp.activate(ignoringOtherApps: true)
 
         if let existing = settingsWindow {
             if existing.isMiniaturized {
                 existing.deminiaturize(nil)
             }
             existing.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            NSApp.setActivationPolicy(.regular)
             existing.orderFrontRegardless()
             existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
             return
         }
 
@@ -80,10 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = settingsDelegate
+        self.settingsWindow = window
+        NSApp.setActivationPolicy(.regular)
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        self.settingsWindow = window
     }
 }
 

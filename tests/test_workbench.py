@@ -9,13 +9,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from scripts.build_silent_app import build_silent_app
 from src.exporters import save_knowledge_entry
 from src.models import KnowledgeEntry
-from src.workbench.app import UI_HTML_PATH, create_server
+from src.workbench.server import UI_HTML_PATH, create_server
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_HEX_COLORS = {"#FFFFFF", "#F7F7F7", "#111111", "#666666", "#E5E5E5"}
@@ -162,24 +163,70 @@ def test_real_workbench_http_server_endpoints(tmp_path: Path, monkeypatch) -> No
         status, _, body = _http_request(base_url, "/api/toggle-companion", method="POST", payload={})
         assert status == 200 and json.loads(body.decode("utf-8"))["running"] is False
 
-        # 6. POST /api/capture-url + GET /api/trigger/sync work non-blocking
+        # 6. POST /api/capture-url works non-blocking
         status, _, body = _http_request(
             base_url, "/api/capture-url", method="POST", payload={"input": "一段用于验证的 AI 工作流笔记"}
         )
         assert status == 200 and json.loads(body.decode("utf-8"))["accepted"] is True
         assert capture_called.wait(timeout=3.0)
 
-        status, _, body = _http_request(base_url, "/api/trigger/sync?format=json")
+        # 7. POST /api/sync-hotspots still works directly for the workbench UI
+        status, _, body = _http_request(base_url, "/api/sync-hotspots", method="POST", payload={})
         assert status == 200 and json.loads(body.decode("utf-8"))["ok"] is True
         assert sync_called.wait(timeout=3.0)
-
-        # Wait briefly for status update and confirm trigger HTML & 404 handling
         time.sleep(0.1)
+
+        # 8. CSRF-hardened Obsidian flow: GET renders a confirm page (no side effect),
+        #    POST /api/action/{action} with the single-use token executes.
+        def _clipboard_state() -> bool:
+            _, _, body_ = _http_request(base_url, "/api/state")
+            return json.loads(body_.decode("utf-8"))["clipboard_watcher"]["running"]
+
+        before = _clipboard_state()
         status, headers, body = _http_request(base_url, "/api/trigger/toggle-clipboard")
         assert status == 200 and "text/html" in headers.get("Content-Type", "")
-        assert "操作已执行" in body.decode("utf-8")
-        # Turn clipboard watcher back off
-        _http_request(base_url, "/api/toggle-clipboard", method="POST", payload={})
+        page = body.decode("utf-8")
+        assert "切换剪贴板监测" in page
+        assert 'method="POST"' in page and "/api/action/toggle-clipboard" in page
+        csrf = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
+        assert _clipboard_state() == before, "GET confirm page must not toggle anything"
+
+        form_data = urllib.parse.urlencode({"csrf": csrf}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{base_url}/api/action/toggle-clipboard", data=form_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            assert "操作已执行" in resp.read().decode("utf-8")
+        assert _clipboard_state() != before, "confirmed POST must actually toggle"
+
+        # Token is single-use: replaying the same CSRF must be rejected 403.
+        req = urllib.request.Request(
+            f"{base_url}/api/action/toggle-clipboard", data=form_data, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("replayed token must be rejected")
+        except urllib.error.HTTPError as err:
+            assert err.code == 403
+
+        # Cross-site fetch is refused outright, even with a (forged) token.
+        cross_site = urllib.parse.urlencode({"csrf": "forged"}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{base_url}/api/action/toggle-clipboard", data=cross_site, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Sec-Fetch-Site": "cross-site"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("cross-site POST must be rejected")
+        except urllib.error.HTTPError as err:
+            assert err.code == 403
+
+        # Restore the pre-test clipboard watcher state.
+        if _clipboard_state() is False and before is True:
+            _http_request(base_url, "/api/toggle-clipboard", method="POST", payload={})
 
         status, _, _ = _http_request(base_url, "/api/trigger/unknown-action")
         assert status == 404

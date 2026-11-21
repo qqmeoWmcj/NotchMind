@@ -33,21 +33,21 @@ public struct NotchIconView: View {
                 Spacer()
             }
 
-            // Luminous neural spark at center-bottom
+            // Luminous neural spark at center-bottom (Monochrome Platinum per DESIGN.md)
             Image(systemName: "sparkle")
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.42, green: 0.85, blue: 1.0),
-                            Color(red: 0.58, green: 0.62, blue: 1.0),
+                            Color.white.opacity(0.95),
+                            Color(white: 0.78),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
                 .offset(y: size * 0.10)
-                .shadow(color: Color(red: 0.42, green: 0.85, blue: 1.0).opacity(0.55), radius: size * 0.14)
+                .shadow(color: Color.white.opacity(0.35), radius: size * 0.12)
 
             RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .stroke(

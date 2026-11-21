@@ -63,7 +63,7 @@ public final class HotkeyManager {
 
         // 1. ⌘⇧S (Capture)
         let captureID = EventHotKeyID(signature: OSType(0x4E4D4831), id: 1) // 'NMH1'
-        RegisterEventHotKey(
+        let err1 = RegisterEventHotKey(
             UInt32(kVK_ANSI_S),
             UInt32(cmdKey | shiftKey),
             captureID,
@@ -71,10 +71,13 @@ public final class HotkeyManager {
             0,
             &captureHotKeyRef
         )
+        if err1 != noErr {
+            NSLog("[HotkeyManager] Warning: failed to register ⌘⇧S shortcut (OSStatus: %d)", err1)
+        }
 
         // 2. ⌘⌃N (Toggle HUD)
         let toggleID = EventHotKeyID(signature: OSType(0x4E4D4832), id: 2) // 'NMH2'
-        RegisterEventHotKey(
+        let err2 = RegisterEventHotKey(
             UInt32(kVK_ANSI_N),
             UInt32(cmdKey | controlKey),
             toggleID,
@@ -82,6 +85,9 @@ public final class HotkeyManager {
             0,
             &toggleHotKeyRef
         )
+        if err2 != noErr {
+            NSLog("[HotkeyManager] Warning: failed to register ⌘⌃N shortcut (OSStatus: %d)", err2)
+        }
     }
 
     public func unregister() {

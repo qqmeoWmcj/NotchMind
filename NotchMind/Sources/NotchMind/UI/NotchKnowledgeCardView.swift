@@ -73,10 +73,24 @@ struct NotchKnowledgeCardView: View {
 
     // MARK: - Header Row
 
+    private var copyButtonTitle: String {
+        if let first = entry.copyReadyPayloads.first {
+            let t = first.type.lowercased()
+            if t.contains("prompt") { return "拷贝 Prompt" }
+            if t.contains("script") { return "拷贝脚本" }
+            if t.contains("command") { return "拷贝命令" }
+            if t.contains("workflow") { return "拷贝工作流" }
+        }
+        if entry.blenderScript != nil || entry.isBlenderRelated {
+            return "拷贝 bpy 脚本"
+        }
+        return "拷贝精华"
+    }
+
     private var headerRow: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 6) {
-                Text(entry.title)
+                Text(entry.displaySkillName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(palette.primary)
                     .lineLimit(isExpanded ? 2 : 1)
@@ -85,7 +99,7 @@ struct NotchKnowledgeCardView: View {
                 Spacer(minLength: 4)
 
                 ZStack(alignment: .trailing) {
-                    Text(relativeTimeString(from: entry.createdAt))
+                    Text(timeAgoString(from: entry.createdAt))
                         .font(.system(size: 11, weight: .regular))
                         .monospacedDigit()
                         .foregroundStyle(palette.tertiary)
@@ -98,60 +112,42 @@ struct NotchKnowledgeCardView: View {
                 .animation(NotchSpring.micro, value: isHovered || isExpanded)
             }
 
-            Text(entry.oneLineEssence)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(palette.secondary)
-                .lineLimit(isExpanded ? 4 : 1)
-                .truncationMode(.tail)
+            if let pain = entry.painPoint, !pain.isEmpty {
+                Text("💡 痛点：\(pain)")
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(isExpanded ? 3 : 1)
+                    .truncationMode(.tail)
+            } else {
+                Text(entry.oneLineEssence)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(isExpanded ? 3 : 1)
+                    .truncationMode(.tail)
+            }
         }
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 2) {
-            let exported = (engine.lastFeedbackExportedID == entry.id)
-            iconButton(
-                id: "feedback",
-                symbol: exported ? "checkmark.circle.fill" : "arrow.uturn.left.circle",
-                tint: palette.primary,
-                help: "反哺到项目优化清单"
+        HStack(spacing: 5) {
+            let isSaved = (engine.lastSavedSkillHubID == entry.id || engine.lastFeedbackExportedID == entry.id)
+            SkillActionButton(
+                title: isSaved ? "已收录" : "★ 收藏技能",
+                symbol: isSaved ? "checkmark" : "star.fill",
+                isHighlighted: true,
+                isDone: isSaved
             ) {
-                engine.exportFeedbackToProject(entry)
-            }
-            .symbolEffect(.bounce, value: exported)
-
-            let copiedBlender = (engine.lastCopiedBlenderScriptID == entry.id)
-            if entry.isBlenderRelated || entry.blenderScript != nil {
-                iconButton(
-                    id: "blender",
-                    symbol: copiedBlender ? "checkmark.circle.fill" : "cube.transparent",
-                    tint: copiedBlender ? palette.primary : palette.secondary,
-                    help: "生成并拷贝 Blender 脚本 (bpy)"
-                ) {
-                    engine.copyBlenderScript(entry)
-                }
-                .symbolEffect(.bounce, value: copiedBlender)
+                engine.saveToSkillHub(entry)
             }
 
-            let copied = (engine.lastCopiedID == entry.id)
-            iconButton(
-                id: "copy",
-                symbol: copied ? "checkmark" : "doc.on.doc",
-                tint: palette.secondary,
-                help: "拷贝核心参数与结论"
+            let isCopied = (engine.lastCopiedID == entry.id)
+            SkillActionButton(
+                title: isCopied ? "已拷贝" : copyButtonTitle,
+                symbol: isCopied ? "checkmark" : "doc.on.doc",
+                isHighlighted: false,
+                isDone: isCopied
             ) {
-                engine.copyEssence(entry)
-            }
-            .symbolEffect(.bounce, value: copied)
-
-            if URLCanonicalizer.isSupportedWebURL(entry.url) {
-                iconButton(
-                    id: "resummarize",
-                    symbol: "arrow.clockwise",
-                    tint: palette.secondary,
-                    help: "按当前学习目标重新深拆"
-                ) {
-                    engine.resummarizeEntry(entry)
-                }
+                engine.copyBestPayload(entry)
             }
 
             iconButton(
@@ -211,6 +207,48 @@ struct NotchKnowledgeCardView: View {
                 .fill(palette.separator)
                 .frame(height: 0.5)
                 .padding(.vertical, 2)
+
+            if !entry.copyReadyPayloads.isEmpty {
+                sectionHeader("即插即用载荷 (Prompt / 脚本 / 命令)")
+                ForEach(entry.copyReadyPayloads) { p in
+                    SkillPayloadBlockView(
+                        payload: p,
+                        isCopied: (engine.lastCopiedID == "\(entry.id)_\(p.id)")
+                    ) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(p.content, forType: .string)
+                        engine.lastCopiedID = "\(entry.id)_\(p.id)"
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.8))
+                            if engine.lastCopiedID == "\(entry.id)_\(p.id)" {
+                                engine.lastCopiedID = nil
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !entry.treasureLinks.isEmpty {
+                SkillTreasureLinksView(links: entry.treasureLinks) { link in
+                    engine.openTreasureLink(link)
+                }
+                .padding(.vertical, 2)
+            }
+
+            if !entry.gotchas.isEmpty {
+                sectionHeader("⚠️ 避坑提醒（小白必看）")
+                ForEach(entry.gotchas, id: \.self) { g in
+                    HStack(alignment: .top, spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.orange.opacity(0.85))
+                        Text(g)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
 
             if !entry.prerequisites.isEmpty {
                 sectionHeader("前置知识")
@@ -347,6 +385,24 @@ struct NotchKnowledgeCardView: View {
                 }
             }
 
+            let exportedFeedback = (engine.lastFeedbackExportedID == entry.id)
+            Button {
+                engine.exportFeedbackToProject(entry)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: exportedFeedback ? "checkmark.circle.fill" : "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(exportedFeedback ? "已反哺到本地项目优化清单 ✓" : "🎯 应用到我的项目（生成落地待办）")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(palette.primary.opacity(0.12)))
+                .foregroundStyle(palette.primary)
+            }
+            .buttonStyle(NotchPressStyle(scale: 0.97))
+            .padding(.top, 4)
+
             Text(entry.domain)
                 .font(.system(size: 11, weight: .regular))
                 .foregroundStyle(palette.tertiary)
@@ -367,15 +423,5 @@ struct NotchKnowledgeCardView: View {
             .foregroundStyle(color)
             .lineSpacing(2)
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func relativeTimeString(from iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: iso) else { return "刚刚" }
-        let seconds = max(0, Int(Date().timeIntervalSince(date)))
-        if seconds < 60 { return "刚刚" }
-        if seconds < 3600 { return "\(seconds / 60) 分钟前" }
-        if seconds < 86400 { return "\(seconds / 3600) 小时前" }
-        return "\(seconds / 86400) 天前"
     }
 }

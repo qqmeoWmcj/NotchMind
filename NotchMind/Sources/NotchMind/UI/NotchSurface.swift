@@ -80,7 +80,7 @@ public struct SurfaceSpec {
         case .clear:
             glass = .clear
             scrimBase = .black
-            scrimAlpha = 0.10 + clampedI * 0.12
+            scrimAlpha = 0.24 + clampedI * 0.14
             baseEdgeColor = .white
             baseEdgeAlpha = 0.36
             needsShadow = true
@@ -106,7 +106,7 @@ public struct SurfaceSpec {
             case .clear:
                 glass = .clear
                 scrimBase = .black
-                scrimAlpha = 0.12 + clampedI * 0.15
+                scrimAlpha = 0.24 + clampedI * 0.14
                 baseEdgeColor = .white
                 baseEdgeAlpha = 0.34
                 needsShadow = true

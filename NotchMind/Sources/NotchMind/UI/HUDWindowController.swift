@@ -37,10 +37,22 @@ final class HUDPanel: NSPanel {
 }
 
 final class HUDHostingView<Content: View>: NSHostingView<Content> {
+    var interactiveBounds: CGRect = .zero
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let hitView = super.hitTest(point)
-        // Pass through mouse clicks landing on transparent spacer / empty background
-        return hitView === self ? nil : hitView
+        // Fall back to super if interactive bounds have not been measured yet
+        if interactiveBounds.isEmpty {
+            return super.hitTest(point)
+        }
+        // In AppKit, hitTest passes `point` in superview/window coordinates (unflipped, y=0 at bottom).
+        // Convert to this view's local coordinate space (isFlipped == true, y=0 at top) to match
+        // the SwiftUI GeometryReader interactive bounds.
+        let localPoint = convert(point, from: superview)
+        if interactiveBounds.insetBy(dx: -4, dy: -4).contains(localPoint) {
+            return super.hitTest(point)
+        }
+        // Outside HUD bounds: let clicks pass through to background apps and desktop
+        return nil
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -53,6 +65,7 @@ final class HUDHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 public final class HUDWindowController: NSObject {
     private var panel: HUDPanel?
+    private var hostingView: HUDHostingView<NotchHUDView>?
     private let engine: CompanionEngine
     private let openSettingsAction: @MainActor () -> Void
     private var screenObserver: NSObjectProtocol?
@@ -62,6 +75,8 @@ public final class HUDWindowController: NSObject {
     private var isUpdatingFrame: Bool = false
     private var recordingCancellable: AnyCancellable?
     private var placementCancellable: AnyCancellable?
+    private var localKeyMonitor: Any?
+    private var globalKeyMonitor: Any?
 
     public static let panelWidth: CGFloat = 444
     public static let panelHeight: CGFloat = 560
@@ -82,11 +97,15 @@ public final class HUDWindowController: NSObject {
         let rootView = NotchHUDView(
             engine: engine,
             metrics: metrics,
-            onOpenSettings: openSettingsAction
+            onOpenSettings: openSettingsAction,
+            onBoundsChange: { [weak self] bounds in
+                self?.hostingView?.interactiveBounds = bounds
+            }
         )
 
         let hosting = HUDHostingView(rootView: rootView)
         hosting.sizingOptions = []
+        self.hostingView = hosting
 
         let frame = computePanelFrame(metrics: metrics)
         let panel = HUDPanel(
@@ -154,6 +173,35 @@ public final class HUDWindowController: NSObject {
                 self?.bringToFront()
             }
         }
+
+        // Global & Local ESC key monitor to fold expanded HUD
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // ESC
+                Task { @MainActor in
+                    self?.engine.collapseHUD()
+                }
+            }
+            return event
+        }
+
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // ESC
+                Task { @MainActor in
+                    if self?.engine.isHUDForceExpanded == true {
+                        self?.engine.collapseHUD()
+                    }
+                }
+            }
+        }
+    }
+
+    isolated deinit {
+        if let localKeyMonitor {
+            NSEvent.removeMonitor(localKeyMonitor)
+        }
+        if let globalKeyMonitor {
+            NSEvent.removeMonitor(globalKeyMonitor)
+        }
     }
 
     public func bringToFront() {
@@ -168,10 +216,14 @@ public final class HUDWindowController: NSObject {
         isUpdatingFrame = false
         panel.isMovableByWindowBackground = !metrics.hasNotch
         if let hosting = panel.contentView as? HUDHostingView<NotchHUDView> {
+            self.hostingView = hosting
             hosting.rootView = NotchHUDView(
                 engine: engine,
                 metrics: metrics,
-                onOpenSettings: openSettingsAction
+                onOpenSettings: openSettingsAction,
+                onBoundsChange: { [weak self] bounds in
+                    self?.hostingView?.interactiveBounds = bounds
+                }
             )
         }
     }

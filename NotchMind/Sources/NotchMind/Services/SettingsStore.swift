@@ -161,7 +161,7 @@ public final class SettingsStore: ObservableObject {
             : 0.0
 
         if defaults.object(forKey: Keys.allowScreenRecording) == nil {
-            self.allowScreenRecording = true
+            self.allowScreenRecording = false
         } else {
             self.allowScreenRecording = defaults.bool(forKey: Keys.allowScreenRecording)
         }

@@ -1,11 +1,20 @@
 import AppKit
 import SwiftUI
 
+public struct HUDInteractiveBoundsKey: PreferenceKey {
+    public static let defaultValue: CGRect = .zero
+    public static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isEmpty { value = next }
+    }
+}
+
 public struct NotchHUDView: View {
     @ObservedObject public var engine: CompanionEngine
     @ObservedObject public var settings: SettingsStore
     public let metrics: ScreenNotchMetrics
     public let onOpenSettings: () -> Void
+    public let onBoundsChange: ((CGRect) -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -19,12 +28,14 @@ public struct NotchHUDView: View {
     public init(
         engine: CompanionEngine,
         metrics: ScreenNotchMetrics,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping () -> Void,
+        onBoundsChange: ((CGRect) -> Void)? = nil
     ) {
         self.engine = engine
         self.settings = engine.settings
         self.metrics = metrics
         self.onOpenSettings = onOpenSettings
+        self.onBoundsChange = onBoundsChange
     }
 
     private var isExpanded: Bool {
@@ -35,7 +46,7 @@ public struct NotchHUDView: View {
         if metrics.hasNotch {
             return (engine.status.isActive || engine.status.isError)
                 ? metrics.notchWidth + 108
-                : metrics.notchWidth + 16
+                : metrics.notchWidth
         }
         return (engine.status.isActive || engine.status.isError) ? 196 : 140
     }
@@ -47,7 +58,7 @@ public struct NotchHUDView: View {
     private var hudShape: ConcaveNotchShape {
         ConcaveNotchShape(
             hasNotch: metrics.hasNotch,
-            topEarRadius: metrics.hasNotch ? (isExpanded ? 16 : 8) : 0,
+            topEarRadius: (metrics.hasNotch && isExpanded) ? 16 : 0,
             bottomRadius: isExpanded ? 24 : (metrics.hasNotch ? 12 : 17)
         )
     }
@@ -79,9 +90,21 @@ public struct NotchHUDView: View {
     public var body: some View {
         VStack(spacing: 0) {
             hudContainer
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: HUDInteractiveBoundsKey.self,
+                            value: geo.frame(in: .named("HUDWindowCoordinateSpace"))
+                        )
+                    }
+                )
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: containerAlignment)
+        .coordinateSpace(name: "HUDWindowCoordinateSpace")
+        .onPreferenceChange(HUDInteractiveBoundsKey.self) { bounds in
+            onBoundsChange?(bounds)
+        }
         .background(Color.clear)
     }
 
@@ -102,11 +125,6 @@ public struct NotchHUDView: View {
                     onOpenSettings: onOpenSettings
                 )
                 .frame(width: 424)
-                .shadow(
-                    color: spec.needsTextShadow ? .black.opacity(0.35) : .clear,
-                    radius: spec.needsTextShadow ? 1.5 : 0,
-                    y: spec.needsTextShadow ? 0.5 : 0
-                )
                 .transition(
                     .asymmetric(
                         insertion: .opacity.animation(.easeOut(duration: 0.18).delay(0.06)),
@@ -140,19 +158,15 @@ public struct NotchHUDView: View {
         .onHover { hovering in
             handleHover(hovering)
         }
+        // Single restrained drop shadow, expanded only (DESIGN.md §1: 外壳单层材质).
+        // The previous dual-phase ambient stack (r5 + r22-24, up to 0.46 black) bled
+        // a broad gray veil around the island edges on light desktops.
         .shadow(
             color: isExpanded
-                ? Color.black.opacity(0.18)
+                ? Color.black.opacity(spec.isGlass ? 0.24 : 0.42)
                 : .clear,
-            radius: 5,
-            y: 2
-        )
-        .shadow(
-            color: isExpanded
-                ? Color.black.opacity(spec.isGlass ? 0.26 : 0.46)
-                : .clear,
-            radius: spec.isGlass ? 22 : 24,
-            y: spec.isGlass ? 10 : 12
+            radius: spec.isGlass ? 12 : 14,
+            y: 4
         )
         .environment(\.colorScheme, palette.scheme)
         .environment(\.notchPalette, palette)
@@ -177,7 +191,15 @@ public struct NotchHUDView: View {
                         .transition(.blurReplace.combined(with: .scale(0.85)))
                 }
                 Spacer(minLength: metrics.notchWidth)
-                if engine.status.isActive || engine.status.isError {
+                if let errorMsg = engine.errorToastMessage {
+                    Text(errorMsg)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.destructive)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 140, alignment: .trailing)
+                        .transition(.opacity.combined(with: .scale(0.9)))
+                } else if engine.status.isActive || engine.status.isError {
                     Text("\(engine.captureCountToday)")
                         .font(.system(size: 11, weight: .semibold))
                         .monospacedDigit()

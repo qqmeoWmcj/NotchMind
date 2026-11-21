@@ -36,6 +36,7 @@ public enum ObsidianWriter {
         let domain = KnowledgeDomain.normalize(entry.domain)
         let domainFile = vaultDir.appendingPathComponent(domain.filename)
         try appendToDomainFile(entry: entry, domain: domain, fileURL: domainFile)
+        _ = try? saveSkillCard(entry: entry, vaultDir: vaultDir)
 
         existing.insert(entry, at: 0)
         try writeJSONAtomic(existing, to: dataDir.appendingPathComponent("entries.json"))
@@ -390,7 +391,7 @@ public enum ObsidianWriter {
         _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
     }
 
-    private static func writeTextAtomic(_ text: String, to url: URL) throws {
+    static func writeTextAtomic(_ text: String, to url: URL) throws {
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
         try text.write(to: tmp, atomically: true, encoding: .utf8)
         if FileManager.default.fileExists(atPath: url.path) {

@@ -17,7 +17,8 @@ from src.companion.xhs_cleaner import (
     now_iso,
     resolve_agent,
 )
-from src.exporters.obsidian import save_knowledge_entry
+from src.exporters.obsidian import save_knowledge_entry  # noqa: F401  (re-exported for tests)
+from src.exporters.obsidian import list_knowledge_entries
 
 _BVID_RE = re.compile(r"(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10})(?![0-9A-Za-z])")
 _B23_RE = re.compile(r"https?://b23\.tv/[0-9A-Za-z]+")
@@ -183,6 +184,18 @@ def _download_and_extract_media(
     return (audio_path if audio_ok else None), sheets, ""
 
 
+def entry_bvid_exists(data_dir: Path | str, bvid: str) -> bool:
+    """True if a knowledge entry already recorded this BVID (pre-analysis dedup check)."""
+    if not bvid:
+        return False
+    needle = f"/video/{bvid}"
+    for entry in list_knowledge_entries(Path(data_dir)):
+        url = str(entry.get("url") or "")
+        if needle in url or str(entry.get("url") or "").rstrip("/").endswith(bvid):
+            return True
+    return False
+
+
 def analyze_bilibili_video(
     url_or_bvid: str, agent: Any, vault_root: Path | str, data_dir: Path | str
 ) -> dict[str, Any]:
@@ -194,6 +207,11 @@ def analyze_bilibili_video(
         return {"ok": False, "error": "未识别到有效的 B 站 BV 号", "input": raw}
 
     canonical_url = f"https://www.bilibili.com/video/{bvid}"
+    if entry_bvid_exists(data_path, bvid):
+        return {
+            "ok": False, "skipped": True, "duplicate": True, "bvid": bvid, "url": canonical_url,
+            "reason": "该 B 站视频已收录过，跳过重复分析",
+        }
     view = fetch_bilibili_view(bvid)
     title = str(view.get("title") or f"B站视频 {bvid}").strip()
     desc = str(view.get("desc") or "").strip()
@@ -306,17 +324,9 @@ def capture_silent_screenshot(output_path: Path, bounds: tuple[int, int, int, in
 
 
 def _capture_optional_audio(output_path: Path, duration_sec: int = 8) -> Path | None:
-    device = os.getenv("COMPANION_AUDIO_DEVICE", "").strip()
-    if not device:
-        return None
-    ffmpeg = find_bin("ffmpeg", _FFMPEG_BINS)
-    spec = device if device.startswith(":") else f":{device}"
-    proc = _run_cmd(
-        [ffmpeg, "-y", "-f", "avfoundation", "-i", spec, "-t", str(duration_sec), "-ac", "1", "-ar", "16000", "-b:a", "32k", str(output_path)],
-        timeout=duration_sec + 8, text=False,
-    )
-    if proc and proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 1024:
-        return output_path
+    """Completely disabled to prevent macOS microphone permission popup alerts.
+    Companion live-watch operates purely on silent visual captures with zero microphone access.
+    """
     return None
 
 
@@ -406,26 +416,27 @@ class LiveCompanionSession:
             with self._lock:
                 if frame_hash == self._last_frame_hash:
                     return {"ok": True, "skipped": True, "reason": "画面无变化，已跳过重复分析"}
-                self._last_frame_hash = frame_hash
 
-            audio_path = _capture_optional_audio(work_dir / "clip.mp3")
             source = "PiliPlus伴随同看" if window.get("is_piliplus") else "伴随同看"
             bvid = window.get("bvid")
             url = window.get("url") or (f"https://www.bilibili.com/video/{bvid}" if bvid else "")
             title = window.get("title") or f"{window.get('app') or '桌面'}实时同看画面"
             prompt_text = (
                 f"伴随同看应用：{window.get('app') or '未知'} | 窗口：{title} | 链接：{url or '无'}\n"
-                "请结合截屏与音频片段（如有），提炼核心知识点、具体操作/Prompt、L1/L2/L3层级与「我可以怎么用」。"
+                "请结合截屏画面，提炼核心知识点、具体操作/Prompt、L1/L2/L3层级与「我可以怎么用」。"
             )
             entry = resolve_agent(self._agent_factory).analyze_content(
                 source=source, title=title, url=url, text=prompt_text,
-                audio_paths=[audio_path] if audio_path else None,
+                audio_paths=None,
                 image_paths=[shot_path],
                 project_names=get_project_names(self.vault_root, self.data_dir),
             )
             saved = save_knowledge_entry(self.vault_root, self.data_dir, entry)
 
         with self._lock:
+            # Commit the frame hash only after the entry landed on disk: a failed
+            # analysis leaves _last_frame_hash unchanged so the next cycle retries.
+            self._last_frame_hash = frame_hash
             self._capture_count += 1
             self._last_capture_at = now_iso()
             self._last_error = None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -139,6 +139,46 @@ class KnowledgeExtraction(BaseModel):
     deep_insight: str = Field(description="Sharp, high-signal insight or anti-consensus judgment (no AI fluff).")
     tags: list[str] = Field(default_factory=list, description="2 to 5 concise Chinese/English topic tags.")
     heat_score: int = Field(default=8, ge=1, le=10, description="Value & signal score from 1 to 10.")
+    actionable_steps: list[str] = Field(
+        default_factory=list,
+        description="Ordered concrete execution steps distilled from the material (commands, parameters, prompts); empty when the material is pure news or cognition with nothing to operate.",
+    )
+    project_optimizations: list[str] = Field(
+        default_factory=list,
+        description="Improvements that feed back into the matched_project's existing pipeline; must be empty when matched_project is null.",
+    )
+    blender_script: str = Field(
+        default="",
+        description="Runnable Blender bpy script only when the material teaches reproducible 3D operations; otherwise empty string.",
+    )
+    concept_breakdown: list[dict] = Field(
+        default_factory=list,
+        description="Bottom-up concept intuition entries: {concept, intuition, analogy}; at most 3, skip when the material has no technical concept.",
+    )
+    skill_name: str = Field(
+        default="",
+        description="Concise name of the skill, tool, or prompt (≤ 12 Chinese chars), e.g. 'Cursor高级Rules配置'.",
+    )
+    pain_point: str = Field(
+        default="",
+        description="What frustrating problem does this skill solve before knowing it? One sharp sentence.",
+    )
+    copy_ready_payloads: list[dict] = Field(
+        default_factory=list,
+        description="Ready-to-use payloads with exact verbatim content: [{type, label, content, source_note}].",
+    )
+    treasure_links: list[dict] = Field(
+        default_factory=list,
+        description="Treasure external tools/repos/links discovered: [{title, url, why}].",
+    )
+    gotchas: list[str] = Field(
+        default_factory=list,
+        description="Beginner pitfalls and version constraints.",
+    )
+    source_type: str = Field(
+        default="general",
+        description="Source type: 'x_post' | 'github' | 'blender_tutorial' | 'general'.",
+    )
 
     @field_validator("domain", mode="before")
     @classmethod
@@ -172,6 +212,43 @@ class KnowledgeEntry(BaseModel):
     created_at: str = Field(default_factory=now_timestamp)
     tags: list[str] = Field(default_factory=list)
     heat_score: int = Field(default=8, ge=1, le=10)
+    actionable_steps: list[str] = Field(default_factory=list)
+    project_optimizations: list[str] = Field(default_factory=list)
+    blender_script: str = ""
+    concept_breakdown: list[dict] = Field(default_factory=list)
+    skill_name: str = ""
+    pain_point: str = ""
+    copy_ready_payloads: list[dict] = Field(default_factory=list)
+    treasure_links: list[dict] = Field(default_factory=list)
+    gotchas: list[str] = Field(default_factory=list)
+    source_type: str = "general"
+
+    def best_payload(self) -> str:
+        if self.copy_ready_payloads:
+            first = self.copy_ready_payloads[0]
+            content = str(first.get("content") or "").strip()
+            if content:
+                return content
+        if self.blender_script.strip():
+            return self.blender_script.strip()
+        if self.actionable_steps:
+            return "\n".join(f"- {s}" for s in self.actionable_steps)
+        return self.how_to_apply or self.one_line_essence
+
+    @field_validator("concept_breakdown", mode="before")
+    @classmethod
+    def _clean_concept_breakdown(cls, value: Any) -> list[dict]:
+        if not isinstance(value, list):
+            return []
+        cleaned: list[dict] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            keys = ("concept", "intuition", "analogy")
+            record = {k: str(item.get(k) or "").strip() for k in keys}
+            if any(record[k] for k in keys):
+                cleaned.append(record)
+        return cleaned[:3]
 
     @field_validator("domain", mode="before")
     @classmethod

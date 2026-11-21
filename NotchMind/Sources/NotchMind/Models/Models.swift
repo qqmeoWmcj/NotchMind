@@ -251,6 +251,12 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
     public var copyableSnippets: [String]
     public var furtherExploration: [String]
     public var blenderScript: String?
+    public var skillName: String?
+    public var painPoint: String?
+    public var copyReadyPayloads: [CopyPayload]
+    public var treasureLinks: [TreasureLink]
+    public var gotchas: [String]
+    public var sourceType: String?
     public var createdAt: String
 
     enum CodingKeys: String, CodingKey {
@@ -269,6 +275,12 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         case copyableSnippets = "copyable_snippets"
         case furtherExploration = "further_exploration"
         case blenderScript = "blender_script"
+        case skillName = "skill_name"
+        case painPoint = "pain_point"
+        case copyReadyPayloads = "copy_ready_payloads"
+        case treasureLinks = "treasure_links"
+        case gotchas
+        case sourceType = "source_type"
         case createdAt = "created_at"
     }
 
@@ -292,6 +304,12 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         copyableSnippets: [String] = [],
         furtherExploration: [String] = [],
         blenderScript: String? = nil,
+        skillName: String? = nil,
+        painPoint: String? = nil,
+        copyReadyPayloads: [CopyPayload] = [],
+        treasureLinks: [TreasureLink] = [],
+        gotchas: [String] = [],
+        sourceType: String? = nil,
         createdAt: String = Self.nowTimestamp()
     ) {
         self.title = title
@@ -312,6 +330,12 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         self.copyableSnippets = copyableSnippets
         self.furtherExploration = furtherExploration
         self.blenderScript = blenderScript
+        self.skillName = skillName
+        self.painPoint = painPoint
+        self.copyReadyPayloads = copyReadyPayloads
+        self.treasureLinks = treasureLinks
+        self.gotchas = gotchas
+        self.sourceType = sourceType
         self.createdAt = createdAt
         if let id, !id.isEmpty {
             self.id = id
@@ -341,7 +365,33 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         self.copyableSnippets = try c.decodeIfPresent([String].self, forKey: .copyableSnippets) ?? []
         self.furtherExploration = try c.decodeIfPresent([String].self, forKey: .furtherExploration) ?? []
         self.blenderScript = try c.decodeIfPresent(String.self, forKey: .blenderScript)
+        self.skillName = try c.decodeIfPresent(String.self, forKey: .skillName)
+        self.painPoint = try c.decodeIfPresent(String.self, forKey: .painPoint)
+        self.copyReadyPayloads = try c.decodeIfPresent([CopyPayload].self, forKey: .copyReadyPayloads) ?? []
+        self.treasureLinks = try c.decodeIfPresent([TreasureLink].self, forKey: .treasureLinks) ?? []
+        self.gotchas = try c.decodeIfPresent([String].self, forKey: .gotchas) ?? []
+        self.sourceType = try c.decodeIfPresent(String.self, forKey: .sourceType)
         self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? Self.nowTimestamp()
+    }
+
+    public var displaySkillName: String {
+        if let skillName, !skillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return skillName
+        }
+        return title
+    }
+
+    public var bestCopyText: String {
+        if let first = copyReadyPayloads.first(where: { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return first.content
+        }
+        if let bs = blenderScript, !bs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return bs
+        }
+        if let snip = copyableSnippets.first, !snip.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return snip
+        }
+        return oneLineEssence
     }
 
     public var isBlenderRelated: Bool {

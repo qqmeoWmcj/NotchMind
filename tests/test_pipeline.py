@@ -118,13 +118,16 @@ def test_minimal_vault_single_domain_file_and_console_update(tmp_path: Path) -> 
     save_knowledge_entry(vault, data_dir, e2)  # duplicate must be ignored cleanly
     save_knowledge_entry(vault, data_dir, e3)
 
-    # Strict 5 fixed root .md files + 1 project incubator folder (no date folders!)
+    # Root files + skill hub directories + project incubator folder
     root_names = sorted(p.name for p in vault.iterdir())
     assert root_names == [
         "00-控制台与速览.md",
         "01-LLM与新模型.md",
+        "01-精选技能库",
         "02-AI学习与教程.md",
+        "02-即插即用工作流",
         "03-AI创作与3D工具.md",
+        "03-项目反哺任务池",
         "04-行业深度认知.md",
         "05-项目孵化池",
     ]
@@ -398,7 +401,17 @@ def test_live_workspace_vault_keeps_strict_minimal_layout() -> None:
     live_vault = PROJECT_ROOT / "vault"
     assert live_vault.exists()
     root_items = sorted(p.name for p in live_vault.iterdir() if p.name != ".DS_Store")
-    expected = ["00-控制台与速览.md", *[f"{d}.md" for d in DOMAINS], "05-项目孵化池"]
+    expected = [
+        "00-控制台与速览.md",
+        "01-LLM与新模型.md",
+        "01-精选技能库",
+        "02-AI学习与教程.md",
+        "02-即插即用工作流",
+        "03-AI创作与3D工具.md",
+        "03-项目反哺任务池",
+        "04-行业深度认知.md",
+        "05-项目孵化池",
+    ]
     assert root_items == expected
     projects_dir = live_vault / "05-项目孵化池"
     assert projects_dir.is_dir()

@@ -143,3 +143,26 @@ func testCompanionEngineCopyBlenderScript() throws {
     #expect(copied.contains("import bpy"))
     #expect(copied.contains("几何节点程序化藤蔓生成"))
 }
+
+@Test("WindowMonitor isCandidateApp enforces strict fast-path whitelist without touching SC")
+func testWindowMonitorCandidateAppFastPath() {
+    // Whitelisted apps: browsers, PiliPlus, Blender
+    #expect(WindowMonitor.isCandidateApp(frontApp: "PiliPlus") == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Google Chrome") == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Safari") == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Arc") == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Blender") == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Blender 4.2") == true)
+
+    // Blocked apps: WeChat, Xcode, Terminal, Finder, NotchMind itself
+    #expect(WindowMonitor.isCandidateApp(frontApp: "WeChat") == false)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Xcode") == false)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Terminal") == false)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Finder") == false)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "NotchMind") == false)
+
+    // Focused mode with keywords
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Obsidian", monitoringMode: .continuous, focusKeywords: ["obsidian"]) == false)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Obsidian", monitoringMode: .focused, focusKeywords: ["obsidian"]) == true)
+    #expect(WindowMonitor.isCandidateApp(frontApp: "Notes", monitoringMode: .focused, focusKeywords: ["obsidian"]) == false)
+}

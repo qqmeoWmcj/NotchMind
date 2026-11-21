@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import argparse
-import html
-import json
 import os
 import threading
+import time
 from datetime import datetime
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
@@ -30,9 +25,17 @@ from src.exporters.obsidian import (
 from src.main import resolve_data_dir, resolve_vault_path, sync_hotspots_once
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-UI_HTML_PATH = Path(__file__).resolve().parent / "ui.html"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+
+# Single source of truth for Obsidian-facing actions: GET renders a confirmation
+# page for these, POST /api/action/{action} executes them.
+_ACTION_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    "sync": ("抓取今日热点", "将抓取多个来源并写入知识库，通常需要 1 至 2 分钟。"),
+    "sync-hotspots": ("抓取今日热点", "将抓取多个来源并写入知识库，通常需要 1 至 2 分钟。"),
+    "toggle-clipboard": ("切换剪贴板监测", "开启或关闭后台剪贴板监听。"),
+    "toggle-companion": ("切换伴随同看", "开启或关闭 PiliPlus / 浏览器伴随同看。"),
+}
 
 
 def _now_str() -> str:
@@ -52,6 +55,7 @@ class WorkbenchController:
         capture_runner: Callable[..., dict[str, Any]] | None = None,
         clipboard_watcher: Any | None = None,
         live_companion: Any | None = None,
+        sync_watchdog_seconds: float = 180.0,
     ) -> None:
         self.env_path = Path(env_path).resolve() if env_path else (PROJECT_ROOT / ".env")
         if self.env_path.exists():
@@ -75,12 +79,31 @@ class WorkbenchController:
 
         self._sync_status: dict[str, Any] = {"running": False, "message": "就绪", "updated_at": "", "last_result": None}
         self._capture_status: dict[str, Any] = {"running": False, "message": "", "updated_at": "", "last_result": None}
+        self._sync_watchdog_seconds = max(1.0, float(sync_watchdog_seconds))
 
     def _default_agent_factory(self) -> GeminiHotspotAgent:
         resolved, _ = get_current_model(env_path=self.env_path)
         return GeminiHotspotAgent(model=resolved)
 
+    def _reap_stalled_sync(self) -> None:
+        """Self-heal a sync whose worker is stuck below the socket layer (no read timeout)."""
+        with self._lock:
+            status = self._sync_status
+            started_at = status.get("started_at")
+            if not status.get("running") or not started_at:
+                return
+            if time.time() - started_at < self._sync_watchdog_seconds:
+                return
+            self._sync_status = {
+                "running": False,
+                "message": f"热点抓取超过 {int(self._sync_watchdog_seconds)}s 未返回，已自动复位，可重新触发",
+                "updated_at": _now_str(),
+                "last_result": {"ok": False, "error": "watchdog_timeout"},
+                "started_at": None,
+            }
+
     def get_state(self, domain: str | None = None, project: str | None = None) -> dict[str, Any]:
+        self._reap_stalled_sync()
         resolved_model, alias = get_current_model(env_path=self.env_path)
         with self._lock:
             sync_status = dict(self._sync_status)
@@ -107,7 +130,7 @@ class WorkbenchController:
         with self._lock:
             if self._sync_status["running"]:
                 return {"ok": True, "started": False, "running": True, "message": "热点抓取正在进行中"}
-            self._sync_status = {"running": True, "message": "正在抓取今日热点...", "updated_at": _now_str(), "last_result": None}
+            self._sync_status = {"running": True, "message": "正在抓取今日热点...", "updated_at": _now_str(), "last_result": None, "started_at": time.time()}
 
         k = top_k if top_k is not None else int(os.getenv("TOP_K_TOPICS", "3"))
 
@@ -127,7 +150,7 @@ class WorkbenchController:
 
     def _set_sync_done(self, message: str, result: Any) -> None:
         with self._lock:
-            self._sync_status = {"running": False, "message": message, "updated_at": _now_str(), "last_result": result}
+            self._sync_status = {"running": False, "message": message, "updated_at": _now_str(), "last_result": result, "started_at": None}
 
     @staticmethod
     def _format_sync_message(result: Any) -> str:
@@ -204,8 +227,16 @@ class WorkbenchController:
         summary = (idea_summary or "").strip() or cleaned_name
         return {"ok": True, "project": create_project_idea(self.vault_root, self.data_dir, cleaned_name, summary)}
 
+    def describe_action(self, action: str) -> tuple[str, str]:
+        normalized = (action or "").strip().lower()
+        try:
+            return _ACTION_DESCRIPTIONS[normalized]
+        except KeyError:
+            raise KeyError(f"未知操作: {action}") from None
+
     def trigger_action(self, action: str) -> dict[str, Any]:
         normalized = (action or "").strip().lower()
+        self.describe_action(normalized)
         if normalized in ("sync", "sync-hotspots"):
             return self.trigger_sync_hotspots()
         if normalized == "toggle-clipboard":
@@ -223,176 +254,8 @@ class WorkbenchController:
                 pass
 
 
-def _render_trigger_page(title: str, message: str) -> bytes:
-    st, sm = html.escape(title), html.escape(message)
-    doc = (
-        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
-        f"<title>{st}</title><style>"
-        'body{margin:0;padding:24px 16px;background:#F7F7F7;color:#111111;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;font-size:14px;}'
-        ".box{max-width:480px;margin:0 auto;background:#FFFFFF;border:1px solid #E5E5E5;border-radius:6px;padding:16px;}"
-        "h1{font-size:20px;font-weight:600;margin:0 0 10px 0;}p{font-size:14px;color:#111111;margin:0 0 14px 0;}"
-        "a{display:inline-block;padding:6px 12px;border:1px solid #E5E5E5;border-radius:6px;background:#FFFFFF;color:#111111;text-decoration:none;font-size:14px;}"
-        "a:hover{background:#F7F7F7;}"
-        f'</style></head><body><div class="box"><h1>{st}</h1><p>{sm}</p><a href="/">打开工作台</a></div></body></html>'
-    )
-    return doc.encode("utf-8")
-
-
-class WorkbenchHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = True
-    daemon_threads = True
-
-    def __init__(self, server_address: tuple[str, int], handler_cls: type[BaseHTTPRequestHandler], controller: WorkbenchController) -> None:
-        self.controller = controller
-        super().__init__(server_address, handler_cls)
-
-
-class WorkbenchRequestHandler(BaseHTTPRequestHandler):
-    server: WorkbenchHTTPServer
-
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-        return
-
-    def _send_common_headers(self, content_type: str, length: int) -> None:
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", "frame-ancestors * http: https: app: obsidian: file:")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-
-    def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
-        self.send_response(status)
-        self._send_common_headers(content_type, len(body))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-        self._send_bytes(status, "application/json; charset=utf-8", json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-
-    def _read_json_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        if length <= 0:
-            return {}
-        raw = self.rfile.read(min(length, 1_048_576))
-        if not raw:
-            return {}
-        data = json.loads(raw.decode("utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("请求体必须为 JSON 对象")
-        return data
-
-    def do_OPTIONS(self) -> None:  # noqa: N802
-        self.send_response(HTTPStatus.NO_CONTENT)
-        self._send_common_headers("text/plain; charset=utf-8", 0)
-        self.end_headers()
-
-    def do_GET(self) -> None:  # noqa: N802
-        parsed = urlparse(self.path)
-        path, query = parsed.path, parse_qs(parsed.query)
-        ctrl = self.server.controller
-
-        if path in ("/", "/index.html"):
-            self._send_bytes(HTTPStatus.OK, "text/html; charset=utf-8", UI_HTML_PATH.read_bytes())
-            return
-
-        if path == "/api/state":
-            domain = (query.get("domain") or [None])[0]
-            project = (query.get("project") or [None])[0]
-            self._send_json(HTTPStatus.OK, ctrl.get_state(domain=domain, project=project))
-            return
-
-        if path.startswith("/api/trigger/"):
-            action = path.removeprefix("/api/trigger/").strip("/")
-            wants_json = (query.get("format") or [""])[0].lower() == "json"
-            try:
-                result = ctrl.trigger_action(action)
-            except KeyError as exc:
-                if wants_json:
-                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": str(exc)})
-                else:
-                    self._send_bytes(HTTPStatus.NOT_FOUND, "text/html; charset=utf-8", _render_trigger_page("操作不存在", str(exc)))
-                return
-            if wants_json:
-                self._send_json(HTTPStatus.OK, result)
-            else:
-                self._send_bytes(HTTPStatus.OK, "text/html; charset=utf-8", _render_trigger_page("操作已执行", str(result.get("message") or "已完成")))
-            return
-
-        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"未找到路径: {path}"})
-
-    def do_POST(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        ctrl = self.server.controller
-        try:
-            body = self._read_json_body()
-        except (ValueError, json.JSONDecodeError) as exc:
-            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": f"无效请求体: {exc}"})
-            return
-
-        try:
-            if path == "/api/model":
-                self._send_json(HTTPStatus.OK, ctrl.switch_model(str(body.get("model") or "")))
-                return
-            if path == "/api/sync-hotspots":
-                top_k_raw = body.get("top_k")
-                top_k = int(top_k_raw) if top_k_raw is not None else None
-                self._send_json(HTTPStatus.OK, ctrl.trigger_sync_hotspots(top_k=top_k, dry_run=bool(body.get("dry_run", False))))
-                return
-            if path == "/api/toggle-clipboard":
-                self._send_json(HTTPStatus.OK, ctrl.toggle_clipboard())
-                return
-            if path == "/api/toggle-companion":
-                self._send_json(HTTPStatus.OK, ctrl.toggle_companion())
-                return
-            if path == "/api/capture-url":
-                raw_input = str(body.get("input") or body.get("url") or body.get("text") or "")
-                self._send_json(HTTPStatus.OK, ctrl.submit_capture(raw_input, source_label=str(body.get("source_label") or "手动提交")))
-                return
-            if path == "/api/projects":
-                name = str(body.get("name") or "")
-                summary = str(body.get("idea_summary") or body.get("summary") or "")
-                self._send_json(HTTPStatus.OK, ctrl.create_project(name=name, idea_summary=summary))
-                return
-        except ValueError as exc:
-            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
-            return
-        except Exception as exc:  # noqa: BLE001
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
-            return
-
-        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"未找到路径: {path}"})
-
-
-def create_server(
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    controller: WorkbenchController | None = None,
-    **controller_kwargs: Any,
-) -> WorkbenchHTTPServer:
-    return WorkbenchHTTPServer((host, port), WorkbenchRequestHandler, controller=controller or WorkbenchController(**controller_kwargs))
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="AI hotspot local minimalist workbench server.")
-    parser.add_argument("--host", type=str, default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--auto-clipboard", action="store_true", help="Enable clipboard watcher on startup.")
-    args = parser.parse_args()
-
-    server = create_server(host=args.host, port=args.port)
-    if args.auto_clipboard:
-        server.controller.clipboard_watcher.start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.controller.shutdown()
-        server.server_close()
-
-
 if __name__ == "__main__":
+    # Keep `python -m src.workbench.app` (used by the silent launcher) working.
+    from src.workbench.server import main
+
     main()

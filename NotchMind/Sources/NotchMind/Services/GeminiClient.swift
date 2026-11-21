@@ -32,6 +32,12 @@ public enum GeminiClient {
         let copyable_snippets: [String]?
         let further_exploration: [String]?
         let blender_script: String?
+        let skill_name: String?
+        let pain_point: String?
+        let copy_ready_payloads: [CopyPayload]?
+        let treasure_links: [TreasureLink]?
+        let gotchas: [String]?
+        let source_type: String?
     }
 
     private struct APIResponse: Decodable {
@@ -75,13 +81,13 @@ public enum GeminiClient {
         }
 
         let prompt = """
-        你是一个高密度、面向深度理解与实战落地的中文知识工程与学习教练助手（融合费曼学习法与主动回忆原理）。请深度拆解以下素材，严格返回 JSON，不要输出任何额外解释或 Markdown 代码块。
+        你是个人技能猎手与深度知识架构师，专门从互联网素材中挖掘用户能立刻拿去用的技能（Skill），拒绝劣质空泛概括。请深度拆解以下素材，严格返回 JSON，不要输出任何额外解释或 Markdown 代码块。
 
-        严格禁止空泛总结（例如“该文章介绍了一些 Blender 技能”、“讲解了某工具的使用方法”这类毫无信息量的废话）。你必须提取出：
-        1. 底层核心概念与直觉类比（让学习者真正理解“为什么有效”，而不是死记步骤）；
-        2. 具体的技法、参数、节点/命令、操作路径与避坑点；
-        3. 能够直接反哺到用户当前项目的可优化手段；
-        4. 2-3 道高质量的主动回忆自测题（考察原理理解与场景应用，禁止无脑复述标题）。
+        核心信条：
+        1. 必须提炼出可在 5 分钟内直接复制执行的 Prompt、脚本、命令或参数。做不到这点的不叫技能。
+        2. Prompt、脚本、代码原文逐字录入，绝不改写、绝不缩写。
+        3. 挖掘所有外链：帖子里提到的每一个工具、插件、仓库链接全部收录到 treasure_links，不可遗漏。
+        4. 痛点与避坑：明确指出不学此技能前会在什么场景抓狂，以及版本限制或避坑点。
 
         \(goalBlock)
 
@@ -96,26 +102,45 @@ public enum GeminiClient {
         - L2工具与AI联动
         - L3一站式自动化
 
-        JSON 字段：
+        JSON 字段规范：
         {
           "title": "精准中文标题（不超过36字，体现核心技法或结论）",
           "domain": "上述四选一",
           "ladder_level": "上述三选一",
-          "one_line_essence": "高信息量核心结论（不超过100字，必须点出具体方法/机制/效果，禁止套话）",
-          "prerequisites": ["学习本内容前建议了解的前置概念或适用场景（1-2条）"],
+          "skill_name": "技能/神器/技巧名（≤12字中文，如：Cursor高级Rules配置）",
+          "pain_point": "解决的核心痛点（一句话直击抓狂场景，拒绝废话）",
+          "one_line_essence": "高信息量核心结论（点出具体机理或事实）",
+          "copy_ready_payloads": [
+            {
+              "type": "prompt|script|command|params|workflow",
+              "label": "用户可读简明标签（如：审查Prompt原文）",
+              "content": "用户可直接拷贝粘贴的完整原文（代码/Prompt/命令）",
+              "source_note": "来源说明（如：推文原帖 / 评论区补充）"
+            }
+          ],
+          "treasure_links": [
+            {
+              "title": "外链或工具名称",
+              "url": "https://...",
+              "why": "为什么值得收藏/解决什么问题"
+            }
+          ],
+          "gotchas": ["小白实操避坑清单（版本约束/已知Bug/报错解法）"],
+          "source_type": "x_post | github | blender_tutorial | general",
+          "prerequisites": ["前置概念或适用场景（1-2条）"],
           "concept_breakdown": [
-            {"term": "核心概念/术语名", "explanation": "用精准但易懂的语言解释底层原理（40-80字）", "analogy": "一句生活或工程类比帮助直觉记忆（可选）"}
+            {"term": "核心概念名", "explanation": "底层原理解释（40-80字）", "analogy": "生活或工程直觉类比"}
           ],
-          "key_points": ["具体知识点/关键参数/核心机制1", "具体知识点2", "具体知识点3"],
-          "actionable_steps": ["可直接照做的实操步骤1（含具体菜单/节点/快捷键/命令）", "实操步骤2", "实操步骤3"],
-          "project_optimizations": ["反哺当前项目的具体可优化手段1（说明改哪里、怎么改、预期收益）", "反哺优化手段2"],
-          "pitfalls": ["常见坑点、误区或边界条件（1-2条）"],
+          "key_points": ["关键参数/核心机制1", "关键参数2"],
+          "actionable_steps": ["实操步骤1（含具体路径/快捷键/命令）", "步骤2"],
+          "project_optimizations": ["反哺个人项目的具体落地待办（怎么改/预期收益）"],
+          "pitfalls": ["常见坑点或误区"],
           "self_check_qa": [
-            {"question": "检验是否真懂的原理或场景应用题", "answer": "简洁准确的参考答案（30-80字）"}
+            {"question": "主动回忆自测题", "answer": "准确参考答案"}
           ],
-          "copyable_snippets": ["可直接复用的 Prompt、命令、节点配方或代码片段（最多2条）"],
-          "further_exploration": ["顺着这个知识点下一步值得深挖的方向或关联主题（1-2条）"],
-          "blender_script": "若内容涉及 3D/Blender（建模、几何节点、材质Shader、渲染灯光、修改器、动画等），请生成一段可直接在 Blender Scripting 运行生效的 Python (bpy) 实操参数脚本（含 import bpy、安全检查与参数设置）；若完全非 3D 场景则为 null"
+          "copyable_snippets": ["备用可复用片段"],
+          "further_exploration": ["下一步深挖方向"],
+          "blender_script": "若涉及 3D/Blender 实操且可代码化，输出可直接在 Blender Scripting 运行的完整 Python (bpy) 脚本；否则设为 null"
         }
 
         来源：\(source)
@@ -188,7 +213,13 @@ public enum GeminiClient {
                 selfCheckQA: parsed.self_check_qa ?? [],
                 copyableSnippets: parsed.copyable_snippets ?? [],
                 furtherExploration: parsed.further_exploration ?? [],
-                blenderScript: parsed.blender_script
+                blenderScript: parsed.blender_script,
+                skillName: parsed.skill_name,
+                painPoint: parsed.pain_point,
+                copyReadyPayloads: parsed.copy_ready_payloads ?? [],
+                treasureLinks: parsed.treasure_links ?? [],
+                gotchas: parsed.gotchas ?? [],
+                sourceType: parsed.source_type
             )
         } catch {
             throw ClientError.decodeFailed("\(error.localizedDescription) | \(jsonString)")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import queue
 import re
 import subprocess
 import threading
@@ -230,6 +231,7 @@ class ClipboardWatcher:
         poll_interval: float = 2.0,
         capture_plain_text: bool = False,
         clipboard_reader: Callable[[], str] | None = None,
+        worker_timeout: float = 2.0,
     ) -> None:
         self.vault_root = Path(vault_root)
         self.data_dir = Path(data_dir)
@@ -237,9 +239,12 @@ class ClipboardWatcher:
         self.poll_interval = max(0.5, float(poll_interval))
         self._capture_plain_text = bool(capture_plain_text)
         self._clipboard_reader = clipboard_reader or read_macos_clipboard
+        self._worker_timeout = max(0.5, float(worker_timeout))
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._queue: queue.Queue[str | None] = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._worker_thread: threading.Thread | None = None
         self._seen_hashes: set[str] = set()
         self._processed_count = 0
         self._recent_events: list[dict[str, Any]] = []
@@ -247,7 +252,9 @@ class ClipboardWatcher:
     @property
     def is_running(self) -> bool:
         with self._lock:
-            return self._thread is not None and self._thread.is_alive()
+            return (self._thread is not None and self._thread.is_alive()) or (
+                self._worker_thread is not None and self._worker_thread.is_alive()
+            )
 
     @property
     def recent_events(self) -> list[dict[str, Any]]:
@@ -260,8 +267,11 @@ class ClipboardWatcher:
             del self._recent_events[30:]
 
     def _status_locked(self) -> dict[str, Any]:
+        running = (self._thread is not None and self._thread.is_alive()) or (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        )
         return {
-            "running": self._thread is not None and self._thread.is_alive(),
+            "running": running,
             "poll_interval": self.poll_interval,
             "capture_plain_text": self._capture_plain_text,
             "processed_count": self._processed_count,
@@ -285,7 +295,10 @@ class ClipboardWatcher:
             initial = self._clipboard_reader()
             if initial and initial.strip():
                 self._seen_hashes.add(hash_clipboard_text(initial))
+            self._queue = queue.Queue()
             self._stop_event.clear()
+            self._worker_thread = threading.Thread(target=self._consume_loop, name="clipboard-worker", daemon=True)
+            self._worker_thread.start()
             self._thread = threading.Thread(target=self._poll_loop, name="clipboard-watcher", daemon=True)
             self._thread.start()
             return self._status_locked()
@@ -294,12 +307,38 @@ class ClipboardWatcher:
         self._stop_event.set()
         with self._lock:
             thread = self._thread
+            worker = self._worker_thread
+        # Wake the blocked consumer so both threads exit promptly instead of
+        # waiting out their queue/poll timeouts.
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
         if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
+            thread.join(timeout=self._worker_timeout)
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=self._worker_timeout)
         with self._lock:
-            if self._thread is thread and not thread.is_alive():
+            if self._thread is thread and thread is not None and not thread.is_alive():
                 self._thread = None
+            if self._worker_thread is worker and worker is not None and not worker.is_alive():
+                self._worker_thread = None
             return self._status_locked()
+
+    def _consume_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None or self._stop_event.is_set():
+                    return
+                self.process_text(item, source_label="剪贴板", dedup=False)
+            except Exception as exc:  # noqa: BLE001
+                self._record_event({
+                    "time": now_iso(), "hash": "", "kind": "error", "ok": False,
+                    "filtered": False, "skipped": False, "title": "剪贴板解析异常", "detail": str(exc),
+                })
+            finally:
+                self._queue.task_done()
 
     def process_text(
         self,
@@ -355,7 +394,7 @@ class ClipboardWatcher:
         return result
 
     def check_once(self) -> dict[str, Any] | None:
-        """Poll clipboard once and process if new content was copied."""
+        """Poll clipboard once; enqueue new content for the worker (never blocks on analysis)."""
         text = self._clipboard_reader()
         if not text or not text.strip():
             return None
@@ -363,7 +402,9 @@ class ClipboardWatcher:
         with self._lock:
             if digest in self._seen_hashes:
                 return None
-        return self.process_text(text, source_label="剪贴板", dedup=True)
+            self._seen_hashes.add(digest)
+        self._queue.put(text)
+        return {"ok": True, "queued": True, "hash": digest[:12]}
 
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
