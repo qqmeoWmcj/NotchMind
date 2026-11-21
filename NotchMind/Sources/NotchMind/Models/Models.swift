@@ -381,17 +381,35 @@ public struct KnowledgeEntry: Codable, Identifiable, Equatable, Sendable {
         return title
     }
 
-    public var bestCopyText: String {
+    public var isSkillCardWorthy: Bool {
+        if copyReadyPayloads.contains(where: { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return true
+        }
+        if let bs = blenderScript, !bs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        let hasName = !(skillName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return hasName && !treasureLinks.isEmpty
+    }
+
+    public var bestPayload: String {
         if let first = copyReadyPayloads.first(where: { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
             return first.content
         }
         if let bs = blenderScript, !bs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return bs
         }
+        if !actionableSteps.isEmpty {
+            return actionableSteps.map { "- \($0)" }.joined(separator: "\n")
+        }
         if let snip = copyableSnippets.first, !snip.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return snip
         }
         return oneLineEssence
+    }
+
+    public var bestCopyText: String {
+        bestPayload
     }
 
     public var isBlenderRelated: Bool {

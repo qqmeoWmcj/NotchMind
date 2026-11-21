@@ -71,16 +71,7 @@ extension CompanionEngine {
     }
 
     public func copyEssence(_ entry: KnowledgeEntry) {
-        let text = entry.copyableSnippets.first ?? entry.oneLineEssence
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        lastCopiedID = entry.id
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.8))
-            if self?.lastCopiedID == entry.id {
-                self?.lastCopiedID = nil
-            }
-        }
+        copyBestPayload(entry)
     }
 
     public func copyActionRecipe(_ entry: KnowledgeEntry) {

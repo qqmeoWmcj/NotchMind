@@ -89,5 +89,17 @@ struct SkillVaultTests {
         #expect(FileManager.default.fileExists(atPath: actFile.path))
         let actContent = try String(contentsOf: actFile, encoding: .utf8)
         #expect(actContent.contains("为 NotchMind 项目注入此 Prompt 规则"))
+
+        // Verify non-skill-worthy entries do NOT create skill cards (no pollution)
+        let plainEntry = KnowledgeEntry(
+            title: "普通行业新闻",
+            source: "HackerNews",
+            url: "https://news.ycombinator.com/item?id=9999",
+            domain: "04-行业深度认知",
+            oneLineEssence: "这是普通的纯认知新闻，无即插即用载荷"
+        )
+        #expect(!plainEntry.isSkillCardWorthy)
+        let nonCardURL = try ObsidianWriter.saveSkillCard(entry: plainEntry, vaultDir: vaultDir)
+        #expect(nonCardURL == nil)
     }
 }

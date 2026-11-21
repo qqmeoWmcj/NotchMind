@@ -26,7 +26,10 @@ extension ObsidianWriter {
     public static func saveSkillCard(
         entry: KnowledgeEntry,
         vaultDir: URL
-    ) throws -> URL {
+    ) throws -> URL? {
+        guard entry.isSkillCardWorthy else {
+            return nil
+        }
         try ensureSkillDirectories(vaultDir: vaultDir)
         let skillsDir = vaultDir.appendingPathComponent(skillsDirname)
         let filename = "SK-\(safeFilename(entry.displaySkillName)).md"
